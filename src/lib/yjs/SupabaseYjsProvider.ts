@@ -89,6 +89,18 @@ export class SupabaseYjsProvider {
 
     this.setStatus('connecting');
     const channelName = `room:${this.roomId}`;
+
+    // Remove any pre-existing channel instance on this topic to avoid duplicate callback errors
+    try {
+      const existingChannels = this.supabase.getChannels();
+      const existing = existingChannels.find((ch: any) => ch.topic === `realtime:${channelName}` || ch.topic === channelName);
+      if (existing) {
+        this.supabase.removeChannel(existing);
+      }
+    } catch {
+      // ignore
+    }
+
     this.channel = this.supabase.channel(channelName, {
       config: {
         broadcast: { self: false },

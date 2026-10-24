@@ -41,6 +41,7 @@ export default function HomePage() {
 
   // Instant room creation form state
   const [roomTitle, setRoomTitle] = useState('');
+  const [customSlugInput, setCustomSlugInput] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('typescript');
   const [accessMode, setAccessMode] = useState<'editor' | 'viewer'>('editor');
   const [isCreating, setIsCreating] = useState(false);
@@ -50,6 +51,15 @@ export default function HomePage() {
 
   const handleCreateRoom = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // If user provided a direct custom slug (like "satta"), navigate directly to /[slug]
+    if (customSlugInput.trim()) {
+      const cleanSlug = customSlugInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      toast.success(`Launching room "${cleanSlug}"...`);
+      router.push(`/${cleanSlug}`);
+      return;
+    }
+
     try {
       setIsCreating(true);
       const res = await fetch('/api/rooms', {
@@ -190,6 +200,26 @@ startCollaboration(activeSession);
                         </option>
                       ))}
                     </select>
+                  </div>
+                </div>
+
+                {/* Custom Clean Slug / Direct URL Input */}
+                <div className="bg-[#07090e]/80 border border-white/10 rounded-2xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Custom Room Name / Direct URL
+                    </label>
+                    <span className="text-[10px] text-slate-500 font-medium">Opens if existing, creates if new</span>
+                  </div>
+                  <div className="flex items-center bg-slate-900/90 rounded-xl border border-white/10 px-3 py-2 text-xs focus-within:border-cyan-400 transition">
+                    <span className="text-slate-500 font-mono select-none">codio.sh/</span>
+                    <input
+                      type="text"
+                      placeholder="satta (or any custom slug)"
+                      value={customSlugInput}
+                      onChange={(e) => setCustomSlugInput(e.target.value)}
+                      className="w-full bg-transparent text-xs font-mono font-bold text-cyan-300 placeholder-slate-600 focus:outline-none px-1"
+                    />
                   </div>
                 </div>
 

@@ -184,41 +184,7 @@ export async function getRoomDetails(publicIdOrId: string, userId?: string | nul
   // Fallback in-memory check
   const room = memoryRooms.get(publicIdOrId);
   if (!room) {
-    // If not found in memory, generate a default guest room on-the-fly for seamless local prototyping
-    const selectedLang = getLanguageById('typescript');
-    const now = new Date().toISOString();
-    const guestRoom: Room = {
-      id: `room_${publicIdOrId}`,
-      public_id: publicIdOrId,
-      owner_id: null,
-      title: 'Collaborative Session',
-      visibility: 'unlisted',
-      default_access_mode: 'editor',
-      is_closed: false,
-      closed_at: null,
-      expires_at: null,
-      created_at: now,
-      updated_at: now,
-    };
-    const guestDoc: DocumentSnapshot = {
-      id: `doc_${publicIdOrId}`,
-      room_id: guestRoom.id,
-      file_name: `main${selectedLang.extension}`,
-      language: selectedLang.monacoId,
-      content_snapshot: selectedLang.sampleCode,
-      revision: 1,
-      created_at: now,
-      updated_at: now,
-    };
-    memoryRooms.set(publicIdOrId, guestRoom);
-    memoryDocuments.set(guestRoom.id, guestDoc);
-    return {
-      room: guestRoom,
-      document: guestDoc,
-      role: 'editor',
-      isOwner: true,
-      canEdit: true,
-    };
+    return null;
   }
 
   if (room.is_closed) return null;
@@ -244,6 +210,164 @@ export async function getRoomDetails(publicIdOrId: string, userId?: string | nul
     role,
     isOwner,
     canEdit: role === 'owner' || role === 'editor',
+  };
+}
+
+/**
+ * Automatically fetch existing room, or create it instantly if user navigates to a custom slug like /satta
+ * Guarantees a room is ALWAYS returned and never fails with an error screen.
+ */
+export async function getOrCreateRoom(
+  publicIdOrId: string,
+  userId?: string | null
+): Promise<RoomDetails | null> {
+  const sanitizedSlug = publicIdOrId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+
+  // 1. Try to fetch existing room directly
+  const existing = await getRoomDetails(sanitizedSlug, userId);
+  if (existing) {
+    return existing;
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  // 2. Direct lookup in Supabase rooms table in case getRoomDetails missed it
+  if (supabase) {
+    try {
+      const { data: dbRoom } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('public_id', sanitizedSlug)
+        .maybeSingle();
+
+      if (dbRoom) {
+        // If explicitly closed or expired by owner, respect that
+        if (dbRoom.is_closed || (dbRoom.expires_at && new Date(dbRoom.expires_at) <= new Date())) {
+          return null;
+        }
+
+        // Fetch or create primary document for this existing room
+        let { data: doc } = await supabase
+          .from('documents')
+          .select('*')
+          .eq('room_id', dbRoom.id)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!doc) {
+          const defaultLang = getLanguageById('typescript');
+          const { data: newDoc } = await supabase
+            .from('documents')
+            .insert({
+              room_id: dbRoom.id,
+              file_name: `main${defaultLang.extension}`,
+              language: defaultLang.monacoId,
+              content_snapshot: defaultLang.sampleCode,
+              revision: 1,
+            })
+            .select('*')
+            .maybeSingle();
+          doc = newDoc;
+        }
+
+        const isOwner = Boolean(userId && dbRoom.owner_id === userId);
+        const role: MemberRole = isOwner ? 'owner' : (dbRoom.default_access_mode === 'viewer' ? 'viewer' : 'editor');
+
+        const fallbackLang = getLanguageById('typescript');
+        return {
+          room: dbRoom,
+          document: doc || {
+            id: `doc_${dbRoom.id}`,
+            room_id: dbRoom.id,
+            file_name: `main${fallbackLang.extension}`,
+            language: fallbackLang.monacoId,
+            content_snapshot: fallbackLang.sampleCode,
+            revision: 1,
+            created_at: dbRoom.created_at,
+            updated_at: dbRoom.updated_at,
+          },
+          role,
+          isOwner,
+          canEdit: role === 'owner' || role === 'editor',
+        };
+      }
+    } catch (lookupErr) {
+      console.warn('[Store] Direct lookup error:', lookupErr);
+    }
+  }
+
+  // Format slug nicely for the room title (e.g. "satta" -> "Satta", "python-algo" -> "Python Algo")
+  const formattedTitle = sanitizedSlug
+    .replace(/[-_]/g, ' ')
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ') || 'Collaborative Room';
+
+  // 3. Auto-create in Supabase
+  if (supabase) {
+    try {
+      const created = await createRoom(
+        {
+          title: formattedTitle,
+          language: 'typescript',
+          visibility: 'unlisted',
+          defaultAccessMode: 'editor',
+          customSlug: sanitizedSlug,
+        },
+        userId
+      );
+
+      const fresh = await getRoomDetails(created.publicId, userId);
+      if (fresh) {
+        return fresh;
+      }
+    } catch (err: any) {
+      console.warn('[Store] Auto-creation in DB had an issue (e.g. concurrent creation), re-fetching:', err?.message || err);
+      // If error was duplicate key, re-fetch
+      const freshAfterConflict = await getRoomDetails(sanitizedSlug, userId);
+      if (freshAfterConflict) {
+        return freshAfterConflict;
+      }
+    }
+  }
+
+  // 4. Memory fallback auto-creation (instant zero-error session)
+  const defaultLang = getLanguageById('typescript');
+  const now = new Date().toISOString();
+  const guestRoom: Room = {
+    id: `room_${sanitizedSlug}`,
+    public_id: sanitizedSlug,
+    owner_id: userId || null,
+    title: formattedTitle,
+    visibility: 'unlisted',
+    default_access_mode: 'editor',
+    is_closed: false,
+    closed_at: null,
+    expires_at: null,
+    created_at: now,
+    updated_at: now,
+  };
+  const guestDoc: DocumentSnapshot = {
+    id: `doc_${sanitizedSlug}`,
+    room_id: guestRoom.id,
+    file_name: `main${defaultLang.extension}`,
+    language: defaultLang.monacoId,
+    content_snapshot: defaultLang.sampleCode,
+    revision: 1,
+    created_at: now,
+    updated_at: now,
+  };
+  memoryRooms.set(sanitizedSlug, guestRoom);
+  memoryRooms.set(guestRoom.id, guestRoom);
+  memoryDocuments.set(guestRoom.id, guestDoc);
+
+  return {
+    room: guestRoom,
+    document: guestDoc,
+    role: 'owner',
+    isOwner: true,
+    canEdit: true,
   };
 }
 

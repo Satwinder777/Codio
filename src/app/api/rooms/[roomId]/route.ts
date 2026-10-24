@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRoomDetails, updateRoom } from '@/lib/rooms/store';
+import { getRoomDetails, getOrCreateRoom, updateRoom } from '@/lib/rooms/store';
 import { UpdateRoomSchema } from '@/lib/validation/schemas';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -19,7 +19,7 @@ export async function GET(
       userId = user?.id || null;
     }
 
-    const details = await getRoomDetails(roomId, userId);
+    const details = await getOrCreateRoom(roomId, userId);
 
     if (!details) {
       return NextResponse.json(

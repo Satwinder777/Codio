@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getRoomDetails } from '@/lib/rooms/store';
+import { getRoomDetails, getOrCreateRoom } from '@/lib/rooms/store';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { CollaborativeEditor } from '@/components/editor/CollaborativeEditor';
 import { AlertTriangle, ArrowLeft, Plus } from 'lucide-react';
@@ -34,16 +34,11 @@ export async function generateMetadata({ params }: RoomPageProps): Promise<Metad
   }
 
   const details = await getRoomDetails(roomId);
-
-  if (!details) {
-    return {
-      title: 'Room Unavailable - Codio',
-    };
-  }
+  const title = details?.room.title || roomId.charAt(0).toUpperCase() + roomId.slice(1);
 
   return {
-    title: `${details.room.title} | Codio (CODENEST)`,
-    description: `Collaborate in real-time on ${details.document.language} code in Codio.`,
+    title: `${title} | Codio (CODENEST)`,
+    description: `Collaborate in real-time in Codio.`,
   };
 }
 
@@ -62,7 +57,8 @@ export default async function DirectRoomPage({ params }: RoomPageProps) {
     userId = user?.id || null;
   }
 
-  const details = await getRoomDetails(roomId, userId);
+  // Auto-fetch if exists, or auto-create instantly if new slug entered
+  const details = await getOrCreateRoom(roomId, userId);
 
   // Room not found, closed, expired, or private access denied
   if (!details) {

@@ -2,12 +2,24 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Code2, Plus, LayoutDashboard, User, LogOut, Sparkles, Terminal } from 'lucide-react';
+import { useRouter, usePathname } from 'next/navigation';
+import { 
+  Code2, 
+  Plus, 
+  LayoutDashboard, 
+  User, 
+  LogOut, 
+  Sparkles, 
+  Settings, 
+  Home, 
+  ChevronRight,
+  Zap
+} from 'lucide-react';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [isCreating, setIsCreating] = useState(false);
 
@@ -35,7 +47,7 @@ export function Navbar() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'Quick Pair Session',
+          title: 'Pair Programming Session',
           language: 'typescript',
           visibility: 'unlisted',
           defaultAccessMode: 'editor',
@@ -63,21 +75,24 @@ export function Navbar() {
   };
 
   return (
-    <header className="glass-panel border-b border-white/[0.08] sticky top-0 z-40 px-4 sm:px-6 py-3.5 backdrop-blur-xl">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#07090e]/85 backdrop-blur-2xl transition-all">
+      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 sm:px-6 py-2.5">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 group-hover:shadow-indigo-500/40 transition-all duration-300">
-            <div className="w-full h-full bg-[#090d16] rounded-[10px] flex items-center justify-center">
+        <Link href="/" className="flex items-center gap-3 group">
+          <div className="relative">
+            <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 opacity-70 blur group-hover:opacity-100 transition duration-300" />
+            <div className="relative w-9 h-9 rounded-xl bg-[#0c1017] border border-white/20 p-0.5 shadow-xl flex items-center justify-center">
               <Code2 className="w-5 h-5 text-indigo-400 group-hover:text-cyan-300 transition-colors" />
             </div>
           </div>
+
           <div className="flex flex-col">
-            <div className="flex items-center gap-1.5">
-              <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+            <div className="flex items-center gap-2">
+              <span className="font-black text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
                 Codio
               </span>
-              <span className="text-[10px] font-bold tracking-widest px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <span className="inline-flex items-center gap-1 text-[9px] font-black tracking-widest uppercase px-2 py-0.5 rounded-full bg-gradient-to-r from-indigo-500/20 to-purple-500/20 text-indigo-300 border border-indigo-500/30 shadow-inner">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                 CODENEST
               </span>
             </div>
@@ -85,33 +100,62 @@ export function Navbar() {
         </Link>
 
         {/* Center Nav Links */}
-        <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-300">
-          <Link href="/" className="hover:text-white transition">
-            Home
+        <nav className="hidden md:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-white/[0.06] text-xs font-medium">
+          <Link
+            href="/"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+              pathname === '/'
+                ? 'bg-indigo-600/20 text-white font-semibold border border-indigo-500/30'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Home</span>
           </Link>
-          <Link href="/dashboard" className="hover:text-white transition flex items-center gap-1.5">
+
+          <Link
+            href="/dashboard"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+              pathname === '/dashboard'
+                ? 'bg-indigo-600/20 text-white font-semibold border border-indigo-500/30'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+            }`}
+          >
             <LayoutDashboard className="w-3.5 h-3.5 text-indigo-400" />
-            Dashboard
+            <span>Dashboard</span>
           </Link>
-          <Link href="/settings" className="hover:text-white transition">
-            Settings
+
+          <Link
+            href="/settings"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition ${
+              pathname === '/settings'
+                ? 'bg-indigo-600/20 text-white font-semibold border border-indigo-500/30'
+                : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5 text-slate-400" />
+            <span>Settings</span>
           </Link>
         </nav>
 
         {/* Right CTA & Auth */}
-        <div className="flex items-center gap-3">
-          {/* Instant Room CTA */}
+        <div className="flex items-center gap-2.5">
+          {/* Instant Room CTA Button */}
           <button
             onClick={handleInstantRoom}
             disabled={isCreating}
-            className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-lg shadow-indigo-500/20 transition-all active:scale-95"
+            className="group relative inline-flex items-center gap-1.5 overflow-hidden rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-500 p-[1px] font-semibold text-xs text-white shadow-lg shadow-indigo-500/25 active:scale-95 transition-all hover:shadow-indigo-500/40"
           >
-            {isCreating ? (
-              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Plus className="w-4 h-4" />
-            )}
-            <span>New Room</span>
+            <span className="flex items-center gap-1.5 rounded-[11px] bg-[#0c1017]/90 px-3.5 py-1.5 transition-all group-hover:bg-opacity-0">
+              {isCreating ? (
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
+                  <span className="font-bold tracking-wide">New Room</span>
+                </>
+              )}
+            </span>
           </button>
 
           {/* User Auth Info */}
@@ -120,29 +164,34 @@ export function Navbar() {
               <Link
                 href="/settings"
                 title={user.email}
-                className="w-8 h-8 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center text-xs font-bold text-indigo-300 hover:border-indigo-500 transition"
+                className="flex items-center gap-1.5 bg-slate-900/80 hover:bg-slate-800 border border-white/10 px-2.5 py-1 rounded-xl text-xs text-slate-200 transition"
               >
-                {user.email?.charAt(0).toUpperCase() || <User className="w-4 h-4" />}
+                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow">
+                  {user.email?.charAt(0) || 'U'}
+                </div>
+                <span className="hidden sm:inline font-medium max-w-[100px] truncate text-slate-300">
+                  {user.user_metadata?.full_name || user.email?.split('@')[0]}
+                </span>
               </Link>
               <button
                 onClick={handleSignOut}
                 title="Sign out"
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
               >
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <Link
                 href="/login"
-                className="text-xs font-medium text-slate-300 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-800/60 transition"
+                className="text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-xl hover:bg-white/[0.06] transition"
               >
                 Sign In
               </Link>
               <Link
                 href="/signup"
-                className="hidden sm:inline-block text-xs font-medium bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-white/10 px-3 py-2 rounded-lg transition"
+                className="hidden sm:inline-flex items-center text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-white/15 px-3 py-1.5 rounded-xl transition shadow"
               >
                 Sign Up
               </Link>
