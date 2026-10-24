@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       success: true,
       publicId,
       roomId,
-      url: `/room/${publicId}`,
+      url: `/${publicId}`,
     });
   } catch (error: any) {
     console.error('Error creating room:', error);

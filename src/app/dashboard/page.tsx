@@ -95,7 +95,7 @@ export default function DashboardPage() {
   };
 
   const handleCopyLink = (publicId: string) => {
-    const url = `${window.location.origin}/room/${publicId}`;
+    const url = `${window.location.origin}/${publicId}`;
     navigator.clipboard.writeText(url);
     setCopiedId(publicId);
     toast.success('Room link copied!');
@@ -287,7 +287,7 @@ export default function DashboardPage() {
                   </button>
 
                   <Link
-                    href={`/room/${room.public_id}`}
+                    href={`/${room.public_id}`}
                     className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition"
                   >
                     <span>Open</span>
