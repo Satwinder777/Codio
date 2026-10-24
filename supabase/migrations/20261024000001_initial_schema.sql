@@ -155,6 +155,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
+-- Check if user is a member of the room (SECURITY DEFINER prevents RLS recursion)
+CREATE OR REPLACE FUNCTION public.is_room_member(p_room_id UUID, p_user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  IF p_user_id IS NULL THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public.room_members
+    WHERE room_id = p_room_id AND user_id = p_user_id
+  );
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
 -- Check if user has edit permission in room
 CREATE OR REPLACE FUNCTION public.can_edit_room(p_room_id UUID, p_user_id UUID)
 RETURNS BOOLEAN AS $$
@@ -228,10 +242,7 @@ CREATE POLICY "Select active public or unlisted rooms, or private if member"
     (
       auth.uid() IS NOT NULL AND (
         owner_id = auth.uid() OR
-        EXISTS (
-          SELECT 1 FROM public.room_members
-          WHERE room_members.room_id = rooms.id AND room_members.user_id = auth.uid()
-        )
+        public.is_room_member(rooms.id, auth.uid())
       )
     )
   );
@@ -309,16 +320,8 @@ CREATE POLICY "Documents can be deleted by room owner"
 CREATE POLICY "Members viewable by room participants"
   ON public.room_members FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM public.rooms r
-      WHERE r.id = room_members.room_id
-      AND (
-        r.owner_id = auth.uid() OR
-        EXISTS (
-          SELECT 1 FROM public.room_members rm WHERE rm.room_id = r.id AND rm.user_id = auth.uid()
-        )
-      )
-    )
+    (auth.uid() IS NOT NULL AND user_id = auth.uid()) OR
+    public.is_room_owner(room_members.room_id, auth.uid())
   );
 
 CREATE POLICY "Only room owner can add/modify members"
