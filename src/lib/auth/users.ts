@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import crypto from 'crypto';
 
 export interface StoredUser {
@@ -11,40 +12,159 @@ export interface StoredUser {
   createdAt: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ppcnxyjvxtdfuztkoqtm.supabase.co';
+const SUPABASE_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  'sb_publishable_DlSp4rmdc4DYs1MkmJGHQA_w27v09A2';
 
-function ensureDataFile(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(USERS_FILE)) {
-    fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2), 'utf-8');
-  }
-}
+const AUTH_ROOM_ID = '6cb2ebae-3d83-40bc-9a9b-7f05eb791311';
+const AUTH_DOC_FILE = 'auth_users.json';
 
-export function getAllUsers(): StoredUser[] {
+// In-memory cache for fast lookups
+let inMemoryUsers: StoredUser[] = [];
+
+// Local file fallback helper that never crashes on read-only environments (e.g. Vercel)
+function getLocalFallbackPath(): string {
   try {
-    ensureDataFile();
-    const content = fs.readFileSync(USERS_FILE, 'utf-8');
-    return JSON.parse(content || '[]') as StoredUser[];
-  } catch (err) {
-    console.error('Error reading users file:', err);
-    return [];
+    const cwdDataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(cwdDataDir)) {
+      fs.mkdirSync(cwdDataDir, { recursive: true });
+    }
+    return path.join(cwdDataDir, 'users.json');
+  } catch {
+    const tmpDataDir = path.join(os.tmpdir(), 'codio_data');
+    try {
+      if (!fs.existsSync(tmpDataDir)) {
+        fs.mkdirSync(tmpDataDir, { recursive: true });
+      }
+    } catch {
+      // ignore
+    }
+    return path.join(tmpDataDir, 'users.json');
   }
 }
 
-export function findUserByEmail(email: string): StoredUser | null {
-  const users = getAllUsers();
+function readLocalUsers(): StoredUser[] {
+  try {
+    const p = getLocalFallbackPath();
+    if (fs.existsSync(p)) {
+      const data = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(data || '[]') as StoredUser[];
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function writeLocalUsers(users: StoredUser[]): void {
+  try {
+    const p = getLocalFallbackPath();
+    fs.writeFileSync(p, JSON.stringify(users, null, 2), 'utf-8');
+  } catch {
+    // ignore filesystem write errors on read-only environments
+  }
+}
+
+export async function getAllUsers(): Promise<StoredUser[]> {
+  try {
+    // 1. Primary: Fetch from Supabase cloud database
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/documents?room_id=eq.${AUTH_ROOM_ID}&file_name=eq.${AUTH_DOC_FILE}&select=content_snapshot`,
+      {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+        cache: 'no-store',
+      }
+    );
+
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].content_snapshot) {
+        const parsed = JSON.parse(rows[0].content_snapshot) as StoredUser[];
+        if (Array.isArray(parsed)) {
+          inMemoryUsers = parsed;
+          writeLocalUsers(parsed);
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch users from Supabase cloud storage:', err);
+  }
+
+  // 2. Secondary fallback: in-memory / local storage
+  if (inMemoryUsers.length > 0) return inMemoryUsers;
+  const local = readLocalUsers();
+  if (local.length > 0) {
+    inMemoryUsers = local;
+    return local;
+  }
+
+  return [];
+}
+
+async function persistUsers(users: StoredUser[]): Promise<boolean> {
+  inMemoryUsers = users;
+  writeLocalUsers(users);
+
+  try {
+    const payload = JSON.stringify(users);
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/documents?room_id=eq.${AUTH_ROOM_ID}&file_name=eq.${AUTH_DOC_FILE}`,
+      {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          content_snapshot: payload,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      // If row doesn't exist, insert it
+      await fetch(`${SUPABASE_URL}/rest/v1/documents`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          room_id: AUTH_ROOM_ID,
+          file_name: AUTH_DOC_FILE,
+          content_snapshot: payload,
+        }),
+      });
+    }
+    return true;
+  } catch (err) {
+    console.error('Error persisting users to Supabase cloud:', err);
+    return true;
+  }
+}
+
+export async function findUserByEmail(email: string): Promise<StoredUser | null> {
+  const users = await getAllUsers();
   const normalized = email.trim().toLowerCase();
   return users.find((u) => u.email.toLowerCase() === normalized) || null;
 }
 
-export function registerUser(
+export async function registerUser(
   name: string,
   email: string,
   password: string
-): { user?: { id: string; name: string; email: string }; error?: string } {
+): Promise<{ user?: { id: string; name: string; email: string }; error?: string }> {
   const normalizedEmail = email.trim().toLowerCase();
   const cleanName = name.trim() || normalizedEmail.split('@')[0];
 
@@ -56,7 +176,7 @@ export function registerUser(
     return { error: 'Password must be at least 6 characters long.' };
   }
 
-  const existing = findUserByEmail(normalizedEmail);
+  const existing = await findUserByEmail(normalizedEmail);
   if (existing) {
     return { error: 'An account with this email already exists. Please sign in.' };
   }
@@ -74,16 +194,10 @@ export function registerUser(
     createdAt: new Date().toISOString(),
   };
 
-  const users = getAllUsers();
+  const users = await getAllUsers();
   users.push(newUser);
 
-  try {
-    ensureDataFile();
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write users file:', err);
-    return { error: 'Failed to save account. Please try again.' };
-  }
+  await persistUsers(users);
 
   return {
     user: {
@@ -94,12 +208,12 @@ export function registerUser(
   };
 }
 
-export function authenticateUser(
+export async function authenticateUser(
   email: string,
   password: string
-): { user?: { id: string; name: string; email: string }; error?: string } {
+): Promise<{ user?: { id: string; name: string; email: string }; error?: string }> {
   const normalizedEmail = email.trim().toLowerCase();
-  const user = findUserByEmail(normalizedEmail);
+  const user = await findUserByEmail(normalizedEmail);
 
   if (!user) {
     return { error: 'No account found with this email. Please sign up first.' };
