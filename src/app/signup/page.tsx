@@ -19,6 +19,19 @@ export default function SignupPage() {
     e.preventDefault();
     setErrorMessage(null);
 
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName) {
+      setErrorMessage('Please enter your full name.');
+      return;
+    }
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+
     if (password.length < 6) {
       setErrorMessage('Password must be at least 6 characters long.');
       return;
@@ -27,80 +40,58 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-        localStorage.setItem('codio_user_name', name.trim() || email.split('@')[0]);
-        localStorage.setItem('codio_user_email', email.trim());
-        window.dispatchEvent(new Event('codio-auth-change'));
-        toast.success('Account created successfully!');
-        router.push('/dashboard');
-        return;
-      }
-
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: name.trim(),
-          },
-        },
+      // 1. Register with backend auth service
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: cleanName,
+          email: cleanEmail,
+          password,
+        }),
       });
 
-      if (error) {
-        if (error.message.toLowerCase().includes('already registered')) {
-          setErrorMessage('This email is already registered. Please sign in.');
-          toast.info('Account already exists. Try signing in.');
-          return;
-        }
+      const data = await res.json();
 
-        // If Supabase hits email rate limit (3/hr on free tier) or verification issues:
-        // Automatically activate developer session so the user is never blocked!
-        if (
-          error.message.toLowerCase().includes('rate limit') ||
-          error.message.toLowerCase().includes('rate_limit') ||
-          error.message.toLowerCase().includes('confirm')
-        ) {
-          localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-          localStorage.setItem('codio_user_name', name.trim() || email.split('@')[0]);
-          localStorage.setItem('codio_user_email', email.trim());
-          window.dispatchEvent(new Event('codio-auth-change'));
-          toast.success('Account created! Welcome to Codio.');
-          router.push('/dashboard');
-          return;
-        }
-
-        setErrorMessage(error.message);
-        toast.error(error.message);
+      if (!res.ok) {
+        setErrorMessage(data.error || 'Failed to create account.');
+        toast.error(data.error || 'Registration failed.');
         return;
       }
 
-      // Supabase created the user account!
-      // Set developer session so the user is never locked out due to unconfirmed email
-      localStorage.setItem('codio_user_id', data.user?.id || `user_${Math.random().toString(36).substring(2, 9)}`);
-      localStorage.setItem('codio_user_name', name.trim() || email.split('@')[0]);
-      localStorage.setItem('codio_user_email', email.trim());
+      // 2. Also register with Supabase in background if available
+      try {
+        const supabase = getSupabaseBrowserClient();
+        if (supabase) {
+          await supabase.auth.signUp({
+            email: cleanEmail,
+            password,
+            options: {
+              data: {
+                full_name: cleanName,
+              },
+            },
+          });
+        }
+      } catch {
+        // Supabase rate-limits or network failures handled gracefully
+      }
+
+      // 3. Establish active session
+      localStorage.setItem('codio_user_id', data.user.id);
+      localStorage.setItem('codio_user_name', data.user.name);
+      localStorage.setItem('codio_user_email', data.user.email);
       window.dispatchEvent(new Event('codio-auth-change'));
 
-      toast.success('Account created! Welcome to Codio.');
+      toast.success('Account created successfully! Welcome to Codio.');
       router.push('/dashboard');
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred');
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setErrorMessage(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleBypassSignUp = () => {
-    const cleanEmail = email.trim() || 'developer@codio.dev';
-    const cleanName = name.trim() || cleanEmail.split('@')[0] || 'Coder';
-    localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-    localStorage.setItem('codio_user_name', cleanName);
-    localStorage.setItem('codio_user_email', cleanEmail);
-    window.dispatchEvent(new Event('codio-auth-change'));
-    toast.success('Account activated! Welcome to Codio.');
-    router.push('/dashboard');
   };
 
   return (
@@ -112,23 +103,14 @@ export default function SignupPage() {
           </div>
           <h1 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Create your Codio Account</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Save rooms and manage editor settings.
+            Sign up to access workspace rooms and collaborative features.
           </p>
         </div>
 
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs space-y-2">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleBypassSignUp}
-              className="w-full mt-1.5 py-1 px-2.5 rounded bg-rose-100 hover:bg-rose-200 dark:bg-rose-500/20 dark:hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 font-medium transition text-center"
-            >
-              Continue to Dashboard with {email.trim() || 'this account'} →
-            </button>
+          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
@@ -140,7 +122,7 @@ export default function SignupPage() {
               <input
                 type="text"
                 required
-                placeholder="Your Name"
+                placeholder="Satwinder Singh"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-400 dark:focus:ring-slate-600 transition"

@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { Code2, Lock, Mail, ArrowRight, UserCheck, AlertCircle } from 'lucide-react';
+import { Code2, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function LoginPage() {
@@ -17,78 +17,105 @@ export default function LoginPage() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+
+    if (!password) {
+      setErrorMessage('Please enter your password.');
+      return;
+    }
+
     setLoading(true);
 
-    const cleanEmail = email.trim();
-
     try {
-      const supabase = getSupabaseBrowserClient();
-      if (!supabase) {
-        localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-        localStorage.setItem('codio_user_name', cleanEmail.split('@')[0] || 'Coder');
-        localStorage.setItem('codio_user_email', cleanEmail);
+      // 1. Authenticate against registered auth service
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        // If not registered or invalid password, also check Supabase directly before rejecting
+        const supabase = getSupabaseBrowserClient();
+        let supabaseSuccess = false;
+        let supabaseUser: { id: string; name?: string; email: string } | null = null;
+
+        if (supabase) {
+          try {
+            const { data: supaData, error: supaErr } = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password,
+            });
+            if (!supaErr && supaData.user) {
+              supabaseSuccess = true;
+              supabaseUser = {
+                id: supaData.user.id,
+                name: supaData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+                email: supaData.user.email || cleanEmail,
+              };
+            }
+          } catch {
+            // ignore network errors
+          }
+        }
+
+        if (!supabaseSuccess || !supabaseUser) {
+          // Strictly reject login! User has NOT signed up or entered wrong password
+          const errText = data.error || 'Invalid email or password. Please check your credentials or sign up.';
+          setErrorMessage(errText);
+          toast.error(errText);
+          return;
+        }
+
+        // Supabase logged in successfully
+        localStorage.setItem('codio_user_id', supabaseUser.id);
+        localStorage.setItem('codio_user_name', supabaseUser.name || 'Coder');
+        localStorage.setItem('codio_user_email', supabaseUser.email);
         window.dispatchEvent(new Event('codio-auth-change'));
-        toast.success('Signed in successfully!');
+        toast.success('Welcome back to Codio!');
         router.push('/dashboard');
         return;
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      });
-
-      if (error) {
-        // Handle unconfirmed email scenario: don't lock out the developer!
-        if (
-          error.message.toLowerCase().includes('not confirmed') ||
-          error.message.toLowerCase().includes('email_not_confirmed') ||
-          error.message.toLowerCase().includes('confirm')
-        ) {
-          localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-          localStorage.setItem('codio_user_name', cleanEmail.split('@')[0] || 'Coder');
-          localStorage.setItem('codio_user_email', cleanEmail);
-          window.dispatchEvent(new Event('codio-auth-change'));
-          toast.success('Signed in successfully! Welcome to Codio.');
-          router.push('/dashboard');
-          return;
+      // Login API succeeded!
+      // Sync with Supabase session if available
+      try {
+        const supabase = getSupabaseBrowserClient();
+        if (supabase) {
+          await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
         }
-
-        setErrorMessage(error.message);
-        toast.error(error.message);
-      } else if (data.user) {
-        localStorage.setItem('codio_user_id', data.user.id);
-        localStorage.setItem('codio_user_name', data.user.user_metadata?.full_name || cleanEmail.split('@')[0] || 'Coder');
-        localStorage.setItem('codio_user_email', cleanEmail);
-        window.dispatchEvent(new Event('codio-auth-change'));
-        toast.success('Welcome back to Codio!');
-        router.push('/dashboard');
+      } catch {
+        // Handled silently
       }
+
+      localStorage.setItem('codio_user_id', data.user.id);
+      localStorage.setItem('codio_user_name', data.user.name);
+      localStorage.setItem('codio_user_email', data.user.email);
+      window.dispatchEvent(new Event('codio-auth-change'));
+
+      toast.success('Welcome back to Codio!');
+      router.push('/dashboard');
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred');
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setErrorMessage(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleBypassSignIn = () => {
-    const cleanEmail = email.trim() || 'developer@codio.dev';
-    localStorage.setItem('codio_user_id', `user_${Math.random().toString(36).substring(2, 9)}`);
-    localStorage.setItem('codio_user_name', cleanEmail.split('@')[0] || 'Coder');
-    localStorage.setItem('codio_user_email', cleanEmail);
-    window.dispatchEvent(new Event('codio-auth-change'));
-    toast.success('Signed in with developer session!');
-    router.push('/dashboard');
-  };
-
-  const handleGuestContinue = () => {
-    const guestName = `Guest ${Math.floor(Math.random() * 900) + 100}`;
-    localStorage.setItem('codio_user_id', `guest_${Math.random().toString(36).substring(2, 9)}`);
-    localStorage.setItem('codio_user_name', guestName);
-    localStorage.setItem('codio_user_email', `${guestName.toLowerCase().replace(/\s+/g, '')}@guest.codio.dev`);
-    window.dispatchEvent(new Event('codio-auth-change'));
-    toast.info('Continuing as Guest Coder');
-    router.push('/dashboard');
   };
 
   return (
@@ -100,23 +127,14 @@ export default function LoginPage() {
           </div>
           <h1 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Sign in to Codio</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Access your rooms and editor preferences.
+            Enter your email and password to access your dashboard.
           </p>
         </div>
 
         {errorMessage && (
-          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs space-y-2">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-            <button
-              type="button"
-              onClick={handleBypassSignIn}
-              className="w-full mt-1.5 py-1 px-2.5 rounded bg-rose-100 hover:bg-rose-200 dark:bg-rose-500/20 dark:hover:bg-rose-500/30 text-rose-700 dark:text-rose-300 font-medium transition text-center"
-            >
-              Sign in with {email.trim() || 'this email'} anyway →
-            </button>
+          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
@@ -171,20 +189,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <div className="relative flex items-center justify-center">
-          <div className="border-t border-slate-200 dark:border-white/10 w-full" />
-          <span className="bg-white dark:bg-[#111622] px-2 text-[10px] text-slate-400 uppercase tracking-wider absolute">Or</span>
-        </div>
-
-        <button
-          onClick={handleGuestContinue}
-          type="button"
-          className="w-full py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition flex items-center justify-center gap-1.5"
-        >
-          <UserCheck className="w-3.5 h-3.5" />
-          <span>Continue as Guest</span>
-        </button>
 
         <p className="text-center text-xs text-slate-500 dark:text-slate-400">
           Don&apos;t have an account?{' '}

@@ -20,10 +20,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+
 export default function DashboardPage() {
   const router = useRouter();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -53,11 +56,34 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    const initialFetchFrame = window.requestAnimationFrame(() => {
-      void fetchRooms();
-    });
-    return () => window.cancelAnimationFrame(initialFetchFrame);
-  }, []);
+    const checkAuth = async () => {
+      const localEmail = typeof window !== 'undefined' ? localStorage.getItem('codio_user_email') : null;
+      if (localEmail) {
+        setIsAuthorized(true);
+        void fetchRooms();
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      if (supabase) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data.session?.user) {
+            setIsAuthorized(true);
+            void fetchRooms();
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      toast.info('Please sign in to access your dashboard.');
+      router.replace('/login');
+    };
+
+    void checkAuth();
+  }, [router]);
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,6 +172,15 @@ export default function DashboardPage() {
   const filteredRooms = rooms.filter((r) => {
     return r.title.toLowerCase().includes(searchQuery.toLowerCase()) || r.public_id.includes(searchQuery);
   });
+
+  if (!isAuthorized) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] space-y-3 font-mono text-xs text-slate-400">
+        <div className="w-5 h-5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+        <span>Authenticating session...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 bg-slate-50 dark:bg-[#0b0f17] text-slate-900 dark:text-slate-100 py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full space-y-6 transition-colors">
