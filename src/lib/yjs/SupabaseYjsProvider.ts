@@ -1,11 +1,13 @@
 import * as Y from 'yjs';
 import { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import { ConnectionStatus, PeerPresence, CollaboratorUser } from '@/types';
-import { uint8ArrayToBase64, base64ToUint8Array } from './utils';
+import { uint8ArrayToBase64, base64ToUint8Array, createSnapshotUpdate } from './utils';
 
 export interface ProviderOptions {
   onStatusChange?: (status: ConnectionStatus) => void;
   onPeersChange?: (peers: PeerPresence[]) => void;
+  onInitialStateReady?: () => void;
+  initialSnapshot?: { content: string; revision: number };
 }
 
 export class SupabaseYjsProvider {
@@ -20,7 +22,9 @@ export class SupabaseYjsProvider {
   private localBroadcastChannel: BroadcastChannel | null = null;
   private options: ProviderOptions;
   private isDestroyed: boolean = false;
-  private syncStep1Sent: boolean = false;
+  private receivedRemoteState = false;
+  private initialStateReady = false;
+  private initialSnapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     roomId: string,
@@ -61,13 +65,13 @@ export class SupabaseYjsProvider {
     }
   }
 
-  private handleLocalDocUpdate = (update: Uint8Array, origin: any) => {
+  private handleLocalDocUpdate = (update: Uint8Array, origin: unknown) => {
     // Prevent echo loop: only broadcast updates that originated locally
-    if (origin === this) return;
+    if (origin === this || this.isDestroyed) return;
 
     const base64Update = uint8ArrayToBase64(update);
 
-    if (this.channel) {
+    if (this.channel && this.status === 'connected') {
       this.channel.send({
         type: 'broadcast',
         event: 'yjs-update',
@@ -90,17 +94,6 @@ export class SupabaseYjsProvider {
     this.setStatus('connecting');
     const channelName = `room:${this.roomId}`;
 
-    // Remove any pre-existing channel instance on this topic to avoid duplicate callback errors
-    try {
-      const existingChannels = this.supabase.getChannels();
-      const existing = existingChannels.find((ch: any) => ch.topic === `realtime:${channelName}` || ch.topic === channelName);
-      if (existing) {
-        this.supabase.removeChannel(existing);
-      }
-    } catch {
-      // ignore
-    }
-
     this.channel = this.supabase.channel(channelName, {
       config: {
         broadcast: { self: false },
@@ -110,10 +103,13 @@ export class SupabaseYjsProvider {
 
     // Handle incoming Yjs updates
     this.channel.on('broadcast', { event: 'yjs-update' }, ({ payload }) => {
+      if (this.isDestroyed || typeof payload?.update !== 'string') return;
       if (payload.senderId === this.user.id) return;
       try {
         const update = base64ToUint8Array(payload.update);
         Y.applyUpdate(this.doc, update, this);
+        this.receivedRemoteState ||= Y.encodeStateVector(this.doc).byteLength > 1;
+        if (this.receivedRemoteState) this.markInitialStateReady();
       } catch (err) {
         console.error('[SupabaseYjsProvider] Failed to apply remote update:', err);
       }
@@ -121,11 +117,12 @@ export class SupabaseYjsProvider {
 
     // Handle sync handshake step 1 (a peer asks for document state)
     this.channel.on('broadcast', { event: 'yjs-sync-step-1' }, ({ payload }) => {
+      if (this.isDestroyed || typeof payload?.stateVector !== 'string') return;
       if (payload.senderId === this.user.id) return;
       try {
         const remoteStateVector = base64ToUint8Array(payload.stateVector);
         const update = Y.encodeStateAsUpdate(this.doc, remoteStateVector);
-        if (update.byteLength > 0) {
+        if (update.byteLength > 0 && Y.encodeStateVector(this.doc).byteLength > 1) {
           this.channel?.send({
             type: 'broadcast',
             event: 'yjs-sync-step-2',
@@ -142,10 +139,13 @@ export class SupabaseYjsProvider {
 
     // Handle sync handshake step 2 (peer sent us document state diff)
     this.channel.on('broadcast', { event: 'yjs-sync-step-2' }, ({ payload }) => {
+      if (this.isDestroyed || typeof payload?.update !== 'string') return;
       if (payload.targetId && payload.targetId !== this.user.id) return;
       try {
         const update = base64ToUint8Array(payload.update);
         Y.applyUpdate(this.doc, update, this);
+        this.receivedRemoteState ||= Y.encodeStateVector(this.doc).byteLength > 1;
+        if (this.receivedRemoteState) this.markInitialStateReady();
       } catch (err) {
         console.error('[SupabaseYjsProvider] Failed to apply sync step 2 update:', err);
       }
@@ -158,8 +158,8 @@ export class SupabaseYjsProvider {
 
       Object.entries(state).forEach(([key, presences]) => {
         if (Array.isArray(presences) && presences.length > 0) {
-          const latest: any = presences[presences.length - 1];
-          if (latest && latest.id !== this.user.id) {
+          const latest = presences[presences.length - 1] as (Partial<CollaboratorUser> & { lastActive?: number }) | undefined;
+          if (latest?.id && latest.id !== this.user.id) {
             newPeers.set(key, {
               clientId: key,
               user: {
@@ -194,7 +194,19 @@ export class SupabaseYjsProvider {
           lastActive: Date.now(),
         });
 
-        // Send sync step 1 handshake
+        // Send local edits made while connecting, then request state from peers.
+        const localState = Y.encodeStateAsUpdate(this.doc);
+        if (localState.byteLength > 0 && Y.encodeStateVector(this.doc).byteLength > 1) {
+          await this.channel?.send({
+            type: 'broadcast',
+            event: 'yjs-update',
+            payload: {
+              update: uint8ArrayToBase64(localState),
+              senderId: this.user.id,
+            },
+          });
+        }
+
         const stateVector = Y.encodeStateVector(this.doc);
         this.channel?.send({
           type: 'broadcast',
@@ -204,10 +216,13 @@ export class SupabaseYjsProvider {
             stateVector: uint8ArrayToBase64(stateVector),
           },
         });
+        this.scheduleInitialSnapshotSeed();
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         this.setStatus('reconnecting');
+        this.scheduleInitialSnapshotSeed();
       } else if (status === 'CLOSED') {
         this.setStatus('offline');
+        this.scheduleInitialSnapshotSeed();
       }
     });
   }
@@ -215,6 +230,7 @@ export class SupabaseYjsProvider {
   private connectLocalBroadcastChannel() {
     if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') {
       this.setStatus('connected');
+      this.scheduleInitialSnapshotSeed();
       return;
     }
 
@@ -223,6 +239,7 @@ export class SupabaseYjsProvider {
     this.localBroadcastChannel = new BroadcastChannel(channelName);
 
     this.localBroadcastChannel.onmessage = (event) => {
+      if (this.isDestroyed) return;
       const data = event.data;
       if (!data) return;
 
@@ -230,6 +247,8 @@ export class SupabaseYjsProvider {
         try {
           const update = base64ToUint8Array(data.update);
           Y.applyUpdate(this.doc, update, this);
+          this.receivedRemoteState ||= Y.encodeStateVector(this.doc).byteLength > 1;
+          if (this.receivedRemoteState) this.markInitialStateReady();
         } catch (err) {
           console.error('[LocalBroadcast] Failed to apply update:', err);
         }
@@ -237,19 +256,21 @@ export class SupabaseYjsProvider {
         try {
           const remoteStateVector = base64ToUint8Array(data.stateVector);
           const update = Y.encodeStateAsUpdate(this.doc, remoteStateVector);
-          if (update.byteLength > 0) {
+          if (update.byteLength > 0 && Y.encodeStateVector(this.doc).byteLength > 1) {
             this.localBroadcastChannel?.postMessage({
               type: 'sync-step-2',
               targetId: data.senderId,
               update: uint8ArrayToBase64(update),
             });
           }
-        } catch (err) {}
+        } catch {}
       } else if (data.type === 'sync-step-2' && (data.targetId === this.user.id || !data.targetId)) {
         try {
           const update = base64ToUint8Array(data.update);
           Y.applyUpdate(this.doc, update, this);
-        } catch (err) {}
+          this.receivedRemoteState ||= Y.encodeStateVector(this.doc).byteLength > 1;
+          if (this.receivedRemoteState) this.markInitialStateReady();
+        } catch {}
       } else if (data.type === 'presence-ping' && data.senderId !== this.user.id) {
         this.peers.set(data.senderId, {
           clientId: data.senderId,
@@ -289,6 +310,34 @@ export class SupabaseYjsProvider {
       user: this.user,
       isGreeting: true,
     });
+    this.scheduleInitialSnapshotSeed();
+  }
+
+  private scheduleInitialSnapshotSeed() {
+    const snapshot = this.options.initialSnapshot;
+    if (!snapshot || this.initialSnapshotTimer || this.initialStateReady || this.isDestroyed) return;
+
+    // Allow an open peer to send its Yjs state first. Concurrent first joins
+    // seed identical updates derived from the same persisted snapshot.
+    this.initialSnapshotTimer = setTimeout(() => {
+      this.initialSnapshotTimer = null;
+      if (this.isDestroyed) return;
+      if (!this.receivedRemoteState && this.doc.getText('monaco').length === 0 && snapshot.content.length > 0) {
+        const update = createSnapshotUpdate(this.roomId, snapshot.revision, snapshot.content);
+        Y.applyUpdate(this.doc, update, 'codio-initial-snapshot');
+      }
+      this.markInitialStateReady();
+    }, 1000);
+  }
+
+  private markInitialStateReady() {
+    if (this.initialStateReady || this.isDestroyed) return;
+    this.initialStateReady = true;
+    if (this.initialSnapshotTimer) {
+      clearTimeout(this.initialSnapshotTimer);
+      this.initialSnapshotTimer = null;
+    }
+    this.options.onInitialStateReady?.();
   }
 
   public updateCursor(lineNumber: number, column: number) {
@@ -319,6 +368,10 @@ export class SupabaseYjsProvider {
 
   public destroy() {
     this.isDestroyed = true;
+    if (this.initialSnapshotTimer) {
+      clearTimeout(this.initialSnapshotTimer);
+      this.initialSnapshotTimer = null;
+    }
     this.doc.off('update', this.handleLocalDocUpdate);
 
     if (this.channel) {

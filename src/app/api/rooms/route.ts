@@ -7,7 +7,13 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const json = await req.json();
+    let json: unknown;
+    try {
+      json = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
+    }
+
     const parsed = CreateRoomSchema.safeParse(json);
 
     if (!parsed.success) {
@@ -32,10 +38,10 @@ export async function POST(req: NextRequest) {
       roomId,
       url: `/${publicId}`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error creating room:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal server error creating room' },
+      { error: error instanceof Error ? error.message : 'Internal server error creating room' },
       { status: 500 }
     );
   }
@@ -55,7 +61,10 @@ export async function GET() {
 
     const rooms = await getUserRooms(user.id);
     return NextResponse.json({ rooms });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error listing rooms' },
+      { status: 500 }
+    );
   }
 }

@@ -11,7 +11,13 @@ export async function POST(
 ) {
   try {
     const { roomId } = await context.params;
-    const json = await req.json();
+    let json: unknown;
+    try {
+      json = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
+    }
+
     const parsed = PersistSnapshotSchema.safeParse(json);
 
     if (!parsed.success) {
@@ -42,8 +48,11 @@ export async function POST(
       revision: result.revision,
       timestamp: new Date().toISOString(),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error persisting snapshot:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error persisting snapshot' },
+      { status: 500 }
+    );
   }
 }

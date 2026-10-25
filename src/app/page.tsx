@@ -1,529 +1,205 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
-import { SUPPORTED_LANGUAGES, getLanguageById } from '@/lib/languages';
-import { 
-  Code2, 
-  Sparkles, 
-  Share2, 
-  Users, 
-  ShieldCheck, 
-  Zap, 
-  Terminal, 
-  ArrowRight, 
-  Lock, 
-  Globe, 
-  Layers, 
-  CheckCircle2, 
-  Cpu, 
-  ChevronDown, 
-  Play,
-  Copy,
-  Laptop
-} from 'lucide-react';
+import { ArrowDown, ArrowRight, Code2, ShieldCheck, UsersRound, Zap } from 'lucide-react';
 import { toast } from 'sonner';
+import { LiveCodeShowcase } from '@/components/landing/LiveCodeShowcase';
+import { SUPPORTED_LANGUAGES } from '@/lib/languages';
+import { extractRoomError, extractRoomPath, MAX_ROOM_TITLE_LENGTH, normalizeRoomTitle } from '@/lib/rooms/client-input';
 
-// Lightweight Monaco preview for landing page hero
-const MonacoPreview = dynamic(() => import('@monaco-editor/react'), {
-  ssr: false,
-  loading: () => (
-    <div className="h-[340px] flex items-center justify-center bg-[#090d16] text-slate-500 text-xs">
-      Loading interactive editor preview...
-    </div>
-  ),
-});
+const benefits = [
+  {
+    icon: UsersRound,
+    eyebrow: '01 / Together',
+    title: 'Two minds, one editor',
+    description: 'Watch each other work, move through the same code, and stay in the flow.',
+  },
+  {
+    icon: Code2,
+    eyebrow: '02 / Familiar',
+    title: 'Feels like your editor',
+    description: 'A fast Monaco workspace with the highlighting and shortcuts developers expect.',
+  },
+  {
+    icon: ShieldCheck,
+    eyebrow: '03 / Yours',
+    title: 'Share on your terms',
+    description: 'Start with a private room and choose who can join and make changes.',
+  },
+];
 
 export default function HomePage() {
   const router = useRouter();
-
-  // Instant room creation form state
   const [roomTitle, setRoomTitle] = useState('');
-  const [customSlugInput, setCustomSlugInput] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('typescript');
-  const [accessMode, setAccessMode] = useState<'editor' | 'viewer'>('editor');
   const [isCreating, setIsCreating] = useState(false);
+  const submissionInProgress = useRef(false);
 
-  // FAQ Accordion state
-  const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const handleCreateRoom = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submissionInProgress.current) return;
 
-  const handleCreateRoom = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
-    // If user provided a direct custom slug (like "satta"), navigate directly to /[slug]
-    if (customSlugInput.trim()) {
-      const cleanSlug = customSlugInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      toast.success(`Launching room "${cleanSlug}"...`);
-      router.push(`/${cleanSlug}`);
-      return;
-    }
+    submissionInProgress.current = true;
+    setIsCreating(true);
 
     try {
-      setIsCreating(true);
-      const res = await fetch('/api/rooms', {
+      const response = await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: roomTitle.trim() || 'Untitled Session',
+          title: normalizeRoomTitle(roomTitle),
           language: selectedLanguage,
           visibility: 'unlisted',
-          defaultAccessMode: accessMode,
+          defaultAccessMode: 'editor',
         }),
       });
 
-      const data = await res.json();
-      if (data.url) {
-        toast.success('Room created! Redirecting...');
-        router.push(data.url);
-      } else {
-        toast.error('Failed to create room');
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        toast.error(extractRoomError(result) ?? 'Could not create the room. Please try again.');
+        return;
       }
+
+      const roomPath = extractRoomPath(result);
+      if (!roomPath) {
+        toast.error('The room was created, but its link could not be loaded. Please try again.');
+        return;
+      }
+
+      toast.success('Your room is ready.');
+      router.push(roomPath);
     } catch {
-      toast.error('Network error creating room');
+      toast.error('Could not reach Codio. Check your connection and try again.');
     } finally {
+      submissionInProgress.current = false;
       setIsCreating(false);
     }
   };
 
-  const previewCode = `// Welcome to Codio (CODENEST) Real-time Pair Session
-// Seamless CRDT synchronization powered by Yjs & Supabase
-
-interface Collaborator {
-  name: string;
-  avatarColor: string;
-  cursor: { line: number; col: number };
-}
-
-const activeSession = {
-  room: "codio-pair-session-alpha",
-  collaborators: [
-    { name: "Alex (Lead)", avatarColor: "#6366f1", cursor: { line: 12, col: 4 } },
-    { name: "Priya (Reviewer)", avatarColor: "#06b6d4", cursor: { line: 15, col: 20 } }
-  ]
-};
-
-function startCollaboration(session: typeof activeSession) {
-  console.log("⚡ Zero lag synchronization active across 2+ peers!");
-  return session.collaborators.map(c => \`\${c.name} is editing concurrently\`);
-}
-
-startCollaboration(activeSession);
-`;
-
-  const faqs = [
-    {
-      q: 'How does real-time collaboration work in Codio?',
-      a: 'Codio uses Yjs, a battle-tested Conflict-free Replicated Data Type (CRDT) engine. Edits are synchronized concurrently across peer clients and converge deterministically without whole-document overwriting or data loss.',
-    },
-    {
-      q: 'Do collaborators need to create an account to edit?',
-      a: 'No! By default, rooms can be created as Unlisted with a shareable URL. Anyone with the URL can join immediately as a guest editor or viewer, with zero signup friction.',
-    },
-    {
-      q: 'How are document snapshots persisted?',
-      a: 'Snapshots are saved to PostgreSQL with intelligent debouncing and monotonic revision control. Out-of-order or delayed writes cannot overwrite newer revisions.',
-    },
-    {
-      q: 'Can I set rooms to read-only for interviews or presentations?',
-      a: 'Yes! You can toggle default room access between Editor and Viewer mode, and owners can update permissions dynamically at any time.',
-    },
-    {
-      q: 'What languages does Codio support?',
-      a: 'Codio supports TypeScript, JavaScript, Python, Rust, Go, C++, C#, Java, HTML, CSS, SQL, JSON, Markdown, Dart, Swift, Kotlin, and PHP with syntax highlighting and indentation rules.',
-    },
-  ];
-
   return (
-    <div className="relative min-h-screen bg-[#090d16] text-slate-100 overflow-hidden">
-      {/* Background Decorative Radial Glows */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[550px] bg-gradient-to-b from-indigo-500/15 via-cyan-500/5 to-transparent blur-3xl pointer-events-none -z-10" />
-      <div className="absolute top-96 right-0 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] pointer-events-none -z-10" />
+    <div className="landing-page relative isolate flex-1 overflow-hidden text-slate-900 transition-colors dark:text-slate-100">
+      <div aria-hidden="true" className="landing-mesh pointer-events-none absolute inset-0 -z-10" />
+      <div aria-hidden="true" className="landing-glow pointer-events-none absolute -top-64 left-[68%] -z-10 h-[42rem] w-[52rem] -translate-x-1/2 rounded-full bg-violet-500/15 blur-[120px] dark:bg-violet-500/20" />
+      <div aria-hidden="true" className="landing-orbit landing-orbit-one pointer-events-none absolute right-[7%] top-24 -z-10 hidden h-80 w-80 rounded-full border border-violet-400/[0.12] lg:block" />
+      <div aria-hidden="true" className="landing-orbit landing-orbit-two pointer-events-none absolute right-[12%] top-36 -z-10 hidden h-64 w-64 rounded-full border border-cyan-300/[0.12] lg:block" />
 
-      {/* Hero Section */}
-      <section className="relative pt-12 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="flex flex-col items-center text-center space-y-6 max-w-4xl mx-auto">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-semibold shadow-inner">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>Next-Generation Collaborative Code Editor</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-            <span className="text-slate-400 font-normal">v1.0 Ready</span>
-          </div>
-
-          {/* Main Title */}
-          <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-[1.15]">
-            Code Together in Real Time.{' '}
-            <span className="bg-gradient-to-r from-indigo-400 via-cyan-400 to-indigo-300 bg-clip-text text-transparent">
-              Zero Friction.
-            </span>
-          </h1>
-
-          {/* Subtitle */}
-          <p className="text-base sm:text-lg text-slate-400 max-w-2xl leading-relaxed">
-            Create a room, share a link, and write code concurrently in Monaco with full syntax highlighting, CRDT conflict convergence, and real-time presence.
-          </p>
-
-          {/* Instant Room Creation Card */}
-          <div className="w-full max-w-2xl mt-4">
-            <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-white/[0.12] shadow-2xl relative group">
-              <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-cyan-500 rounded-3xl blur opacity-20 group-hover:opacity-30 transition duration-500 -z-10" />
-              
-              <form onSubmit={handleCreateRoom} className="space-y-4 text-left">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Session Title <span className="text-slate-500 font-normal">(Optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g., Python Algorithm Interview"
-                      value={roomTitle}
-                      onChange={(e) => setRoomTitle(e.target.value)}
-                      className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
-                    />
-                  </div>
-
-                  <div className="w-full sm:w-48">
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Language
-                    </label>
-                    <select
-                      value={selectedLanguage}
-                      onChange={(e) => setSelectedLanguage(e.target.value)}
-                      className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 transition cursor-pointer"
-                    >
-                      {SUPPORTED_LANGUAGES.map((lang) => (
-                        <option key={lang.id} value={lang.id} className="bg-slate-900 text-white">
-                          {lang.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* Custom Clean Slug / Direct URL Input */}
-                <div className="bg-[#07090e]/80 border border-white/10 rounded-2xl p-3 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Custom Room Name / Direct URL
-                    </label>
-                    <span className="text-[10px] text-slate-500 font-medium">Opens if existing, creates if new</span>
-                  </div>
-                  <div className="flex items-center bg-slate-900/90 rounded-xl border border-white/10 px-3 py-2 text-xs focus-within:border-cyan-400 transition">
-                    <span className="text-slate-500 font-mono select-none">codio.sh/</span>
-                    <input
-                      type="text"
-                      placeholder="satta (or any custom slug)"
-                      value={customSlugInput}
-                      onChange={(e) => setCustomSlugInput(e.target.value)}
-                      className="w-full bg-transparent text-xs font-mono font-bold text-cyan-300 placeholder-slate-600 focus:outline-none px-1"
-                    />
-                  </div>
-                </div>
-
-                {/* Popular Language Quick Chips */}
-                <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                  <span className="text-[11px] text-slate-400 mr-1 font-medium">Quick pick:</span>
-                  {['typescript', 'python', 'rust', 'go', 'javascript', 'cpp', 'html'].map((langId) => (
-                    <button
-                      key={langId}
-                      type="button"
-                      onClick={() => setSelectedLanguage(langId)}
-                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${
-                        selectedLanguage === langId
-                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-                          : 'bg-slate-900/60 text-slate-400 border-white/5 hover:text-white hover:border-white/15'
-                      }`}
-                    >
-                      {getLanguageById(langId).name}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Submit Action Button */}
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isCreating}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-xl font-bold text-sm bg-gradient-to-r from-indigo-500 via-indigo-600 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white shadow-xl shadow-indigo-500/25 transition-all duration-200 active:scale-[0.99]"
-                  >
-                    {isCreating ? (
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 fill-white" />
-                        <span>Create Collaborative Room Now</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+      <div className="mx-auto w-full max-w-[1380px] px-4 pb-16 pt-10 sm:px-6 sm:pt-14 lg:px-10 lg:pb-20 lg:pt-20">
+        <section className="grid items-center gap-14 lg:min-h-[610px] lg:grid-cols-[0.9fr_1.1fr] lg:gap-12">
+          <div className="landing-enter relative z-10 mx-auto w-full max-w-[580px] lg:mx-0">
+            <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-violet-300/30 bg-white/65 px-3.5 py-2 text-[11px] font-semibold tracking-[0.02em] text-violet-800 shadow-sm backdrop-blur dark:border-violet-300/15 dark:bg-white/[0.045] dark:text-violet-100">
+              <span className="relative flex h-2 w-2"><span className="landing-status-ring absolute inset-0 rounded-full bg-emerald-400" /><span className="relative h-2 w-2 rounded-full bg-emerald-400" /></span>
+              THE ROOM WHERE IDEAS CLICK
+              <span className="text-violet-400">✳</span>
             </div>
-          </div>
-        </div>
 
-        {/* Live Monaco Code Preview Mockup */}
-        <div className="mt-16 max-w-5xl mx-auto">
-          <div className="glass-panel border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
-            {/* Top Bar of the Mock Editor */}
-            <div className="bg-[#0f172a] px-4 py-3 border-b border-white/[0.08] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 mr-3">
-                  <div className="w-3 h-3 rounded-full bg-rose-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-                  <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                </div>
-                <span className="text-xs font-mono font-medium text-slate-300 flex items-center gap-1.5">
-                  <Code2 className="w-3.5 h-3.5 text-indigo-400" />
-                  codio-session.ts
-                </span>
+            <h1 className="max-w-[620px] text-[2.85rem] font-semibold leading-[1.01] tracking-[-0.065em] text-slate-950 dark:text-white sm:text-6xl lg:text-[4.6rem]">
+              The best ideas
+              <br />
+              happen <span className="landing-gradient-text">together.</span>
+            </h1>
+            <p className="mt-6 max-w-[470px] text-[15px] leading-7 text-slate-600 dark:text-slate-300 sm:text-base sm:leading-8">
+              A shared coding room that feels a little like leaning over your teammate’s shoulder—only you’re both in the driver’s seat.
+            </p>
+
+            <form onSubmit={handleCreateRoom} className="landing-form-card mt-8 max-w-[530px] rounded-2xl border border-violet-300/25 bg-white/75 p-3 shadow-[0_18px_60px_-35px_rgba(76,55,175,0.55)] backdrop-blur-xl dark:border-white/10 dark:bg-[#101426]/75 sm:p-4">
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <label htmlFor="room-title" className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-300"><Zap className="h-3.5 w-3.5" /></span>
+                  Start a room
+                </label>
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">No account needed</span>
               </div>
-
-              {/* Live Mock Collaborators */}
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  2 Collaborators Live
-                </span>
-                <div className="flex -space-x-1.5">
-                  <div className="w-6 h-6 rounded-full bg-indigo-600 border border-slate-900 flex items-center justify-center text-[10px] font-bold text-white">
-                    A
-                  </div>
-                  <div className="w-6 h-6 rounded-full bg-cyan-500 border border-slate-900 flex items-center justify-center text-[10px] font-bold text-white">
-                    P
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Monaco Sandbox */}
-            <div className="h-[340px]">
-              <MonacoPreview
-                height="100%"
-                language="typescript"
-                theme="vs-dark"
-                value={previewCode}
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  scrollBeyondLastLine: false,
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  padding: { top: 12, bottom: 12 },
-                  automaticLayout: true,
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Feature Showcase Grid */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/[0.06]">
-        <div className="text-center max-w-3xl mx-auto mb-16 space-y-3">
-          <h2 className="text-xs uppercase tracking-widest font-bold text-indigo-400">
-            Engineered For High-Performance Collaboration
-          </h2>
-          <p className="text-3xl font-extrabold text-white tracking-tight">
-            Everything you need for seamless pair programming
-          </p>
-          <p className="text-xs sm:text-sm text-slate-400">
-            Built from first principles with CRDTs, real-time presence, and enterprise-grade Row-Level Security.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Card 1 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-              <Zap className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Yjs CRDT Synchronization</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Edits converge instantly without conflict or silent overwrites, even when multiple developers type on the same line at the same time.
-            </p>
-          </div>
-
-          {/* Card 2 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <Terminal className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Full Monaco IDE Engine</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              The exact code editor engine that powers VS Code: multi-cursor, bracket matching, syntax highlighting, format document, and custom dark themes.
-            </p>
-          </div>
-
-          {/* Card 3 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <Share2 className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Instant Shareable Links</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              No mandatory signup or setup required. Create a room and copy the link to collaborate instantly with interviewers or teammates.
-            </p>
-          </div>
-
-          {/* Card 4 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-400">
-              <Users className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Live Presence & Cursors</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Track who is currently active in the room with colored avatar pills and synchronized cursor position tooltips.
-            </p>
-          </div>
-
-          {/* Card 5 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <Layers className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Monotonic Snapshot Persistence</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Debounced server-side snapshots with sequential revision tracking ensure that delayed writes never overwrite newer document updates.
-            </p>
-          </div>
-
-          {/* Card 6 */}
-          <div className="glass-card p-6 rounded-2xl space-y-3 transition">
-            <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white">Granular Access Control</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Switch rooms between public, unlisted, and private. Enforce read-only viewer mode for technical demos or interviews.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Target Use-Cases */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/[0.06]">
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <h2 className="text-xs uppercase tracking-widest font-bold text-cyan-400">
-            Tailored For Modern Workflows
-          </h2>
-          <p className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            Built for developers, educators, and teams
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-center">
-          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-2">
-            <div className="w-10 h-10 mx-auto rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-              <Users className="w-5 h-5" />
-            </div>
-            <h4 className="text-sm font-bold text-white">Pair Programming</h4>
-            <p className="text-xs text-slate-400">
-              Review code and solve tough bugs side-by-side with your colleagues.
-            </p>
-          </div>
-
-          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-2">
-            <div className="w-10 h-10 mx-auto rounded-xl bg-cyan-500/20 flex items-center justify-center text-cyan-400">
-              <Laptop className="w-5 h-5" />
-            </div>
-            <h4 className="text-sm font-bold text-white">Technical Interviews</h4>
-            <p className="text-xs text-slate-400">
-              Run smooth live coding interviews with syntax highlighting and read-only toggle.
-            </p>
-          </div>
-
-          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-2">
-            <div className="w-10 h-10 mx-auto rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <Code2 className="w-5 h-5" />
-            </div>
-            <h4 className="text-sm font-bold text-white">Classrooms & Demos</h4>
-            <p className="text-xs text-slate-400">
-              Demonstrate algorithms live to dozens of students concurrently.
-            </p>
-          </div>
-
-          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-2">
-            <div className="w-10 h-10 mx-auto rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400">
-              <Terminal className="w-5 h-5" />
-            </div>
-            <h4 className="text-sm font-bold text-white">Rapid Prototyping</h4>
-            <p className="text-xs text-slate-400">
-              Quickly test snippets in any of 17 supported programming languages.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ Accordion Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto border-t border-white/[0.06]">
-        <div className="text-center mb-12">
-          <h2 className="text-xs uppercase tracking-widest font-bold text-indigo-400">
-            Frequently Asked Questions
-          </h2>
-          <p className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-            Answers to technical questions
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          {faqs.map((faq, idx) => (
-            <div
-              key={idx}
-              className="glass-panel rounded-2xl border border-white/[0.08] overflow-hidden transition"
-            >
-              <button
-                onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
-                className="w-full px-6 py-4 flex items-center justify-between text-left text-sm font-semibold text-white hover:text-indigo-300 transition"
-              >
-                <span>{faq.q}</span>
-                <ChevronDown
-                  className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                    openFaq === idx ? 'rotate-180 text-indigo-400' : ''
-                  }`}
+              <div className="grid gap-2 sm:grid-cols-[1fr_150px]">
+                <input
+                  id="room-title"
+                  name="title"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={MAX_ROOM_TITLE_LENGTH}
+                  value={roomTitle}
+                  onChange={(event) => setRoomTitle(event.target.value)}
+                  placeholder="Name your room (optional)"
+                  aria-label="Room name, optional"
+                  className="min-h-11 min-w-0 rounded-xl border border-slate-200 bg-white/80 px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-violet-300 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-black/20 dark:text-white dark:placeholder:text-slate-500 dark:hover:border-white/20 dark:focus:border-violet-400"
                 />
+                <label className="sr-only" htmlFor="room-language">Programming language</label>
+                <select
+                  id="room-language"
+                  name="language"
+                  value={selectedLanguage}
+                  onChange={(event) => setSelectedLanguage(event.target.value)}
+                  className="min-h-11 cursor-pointer rounded-xl border border-slate-200 bg-white/80 px-3 text-sm text-slate-800 outline-none transition hover:border-violet-300 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-[#171a2b] dark:text-slate-100 dark:hover:border-white/20 dark:focus:border-violet-400"
+                >
+                  {SUPPORTED_LANGUAGES.map((language) => (
+                    <option key={language.id} value={language.id}>{language.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="submit"
+                disabled={isCreating}
+                className="landing-create-button group mt-2.5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 px-4 text-sm font-semibold text-white shadow-[0_12px_30px_-12px_rgba(96,74,220,0.8)] transition duration-300 hover:-translate-y-0.5 hover:shadow-[0_17px_36px_-12px_rgba(99,102,241,0.8)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-violet-500/30 active:translate-y-0 disabled:cursor-wait disabled:opacity-70"
+              >
+                {isCreating ? (
+                  <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                ) : (
+                  <>Create your room <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" /></>
+                )}
               </button>
-              {openFaq === idx && (
-                <div className="px-6 pb-4 pt-1 text-xs text-slate-400 leading-relaxed border-t border-white/[0.04]">
-                  {faq.a}
-                </div>
-              )}
+              <div className="flex items-center justify-center gap-1.5 pt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                <ShieldCheck className="h-3 w-3 text-emerald-500" /> Private by default <span className="mx-1 text-slate-300 dark:text-slate-700">·</span> Ready in seconds
+              </div>
+            </form>
+
+            <div className="mt-6 flex items-center gap-3">
+              <div className="flex -space-x-2" aria-hidden="true">
+                <span className="landing-avatar bg-amber-400">M</span>
+                <span className="landing-avatar bg-cyan-500">A</span>
+                <span className="landing-avatar bg-fuchsia-500">J</span>
+              </div>
+              <p className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">A better kind of pairing.</span>
+                <br className="sm:hidden" /> Just send a link and start creating.
+              </p>
             </div>
-          ))}
-        </div>
-      </section>
 
-      {/* Bottom CTA Banner */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
-        <div className="relative glass-card p-8 sm:p-12 rounded-3xl text-center space-y-6 overflow-hidden border border-indigo-500/20 glow-primary">
-          <div className="max-w-2xl mx-auto space-y-3">
-            <h2 className="text-3xl font-extrabold text-white tracking-tight">
-              Ready to start coding collaboratively?
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300">
-              No credit card. No installation. Launch an instant room right now.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button
-              onClick={handleCreateRoom}
-              className="w-full sm:w-auto px-8 py-3.5 rounded-xl text-sm font-bold bg-white text-slate-900 hover:bg-slate-100 shadow-xl transition"
-            >
-              Launch Room Now
-            </button>
-            <Link
-              href="/dashboard"
-              className="w-full sm:w-auto px-8 py-3.5 rounded-xl text-sm font-bold bg-slate-900/80 hover:bg-slate-800 text-white border border-white/10 transition"
-            >
-              View Dashboard
+            <Link href="/dashboard" className="group mt-5 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-200">
+              Go to your rooms <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
             </Link>
           </div>
-        </div>
-      </section>
+
+          <div className="landing-enter landing-delay-1 relative mx-auto w-full max-w-[690px] lg:mx-0 lg:justify-self-end">
+            <LiveCodeShowcase />
+            <div className="mt-9 flex items-center justify-center gap-2 text-[10px] font-medium uppercase tracking-[0.17em] text-slate-400 dark:text-slate-500 sm:text-[11px]">
+              <span>Watch the room come to life</span><ArrowDown className="h-3 w-3 animate-bounce text-violet-400" />
+            </div>
+          </div>
+        </section>
+
+        <section aria-label="Why teams code with Codio" className="landing-enter landing-delay-2 mx-auto mt-20 max-w-6xl border-t border-slate-200/70 pt-8 dark:border-white/[0.08] lg:mt-24">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3 px-1">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-600 dark:text-violet-300">Less setup. More flow.</p>
+              <h2 className="mt-1.5 text-lg font-semibold tracking-tight text-slate-900 dark:text-white">Everything you need to get in sync.</h2>
+            </div>
+            <span className="hidden font-mono text-[10px] text-slate-400 dark:text-slate-500 sm:inline">DESIGNED FOR THE MOMENT IT CLICKS</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3 sm:gap-4">
+            {benefits.map(({ icon: Icon, eyebrow, title, description }, index) => (
+              <article key={title} style={{ animationDelay: `${index * 90}ms` }} className="landing-feature group rounded-2xl border border-slate-200/75 bg-white/55 p-4 transition duration-300 hover:-translate-y-1 hover:border-violet-300/50 hover:bg-white/90 hover:shadow-[0_18px_40px_-28px_rgba(79,70,229,0.6)] dark:border-white/[0.07] dark:bg-white/[0.025] dark:hover:border-violet-300/20 dark:hover:bg-white/[0.05] sm:p-5">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[9px] font-semibold tracking-[0.15em] text-slate-400 dark:text-slate-500">{eyebrow}</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 transition duration-300 group-hover:rotate-[-6deg] group-hover:scale-110 dark:text-violet-300"><Icon className="h-4 w-4" /></span>
+                </div>
+                <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
+                <p className="mt-1.5 text-xs leading-5 text-slate-500 dark:text-slate-400">{description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

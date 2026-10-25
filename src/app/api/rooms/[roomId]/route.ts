@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getRoomDetails, getOrCreateRoom, updateRoom } from '@/lib/rooms/store';
+import { getOrCreateRoom, updateRoom } from '@/lib/rooms/store';
 import { UpdateRoomSchema } from '@/lib/validation/schemas';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -36,9 +36,12 @@ export async function GET(
       isOwner: details.isOwner,
       canEdit: details.canEdit,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching room:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error fetching room' },
+      { status: 500 }
+    );
   }
 }
 
@@ -48,7 +51,13 @@ export async function PATCH(
 ) {
   try {
     const { roomId } = await context.params;
-    const json = await req.json();
+    let json: unknown;
+    try {
+      json = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
+    }
+
     const parsed = UpdateRoomSchema.safeParse(json);
 
     if (!parsed.success) {
@@ -74,7 +83,10 @@ export async function PATCH(
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error updating room' },
+      { status: 500 }
+    );
   }
 }

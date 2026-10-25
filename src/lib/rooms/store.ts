@@ -1,15 +1,74 @@
 import { nanoid } from 'nanoid';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Room, DocumentSnapshot, RoomDetails, MemberRole } from '@/types';
 import { getLanguageById } from '@/lib/languages';
 import { CreateRoomInput, UpdateRoomInput, PersistSnapshotInput } from '@/lib/validation/schemas';
-import { createSupabaseServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { isValidRoomSlug, normalizeRoomSlug } from './identifiers';
 
-// Server-side / in-memory fallback store when Supabase credentials are not configured
-const memoryRooms = new Map<string, Room>();
-const memoryDocuments = new Map<string, DocumentSnapshot>();
+// Share the fallback store across Next.js route bundles and Fast Refresh reloads.
+type MemoryRoomStore = {
+  rooms: Map<string, Room>;
+  documents: Map<string, DocumentSnapshot>;
+};
+
+const serverGlobal = globalThis as typeof globalThis & {
+  __codioMemoryRoomStore?: MemoryRoomStore;
+};
+const memoryStore = serverGlobal.__codioMemoryRoomStore ??= {
+  rooms: new Map<string, Room>(),
+  documents: new Map<string, DocumentSnapshot>(),
+};
+const { rooms: memoryRooms, documents: memoryDocuments } = memoryStore;
+
+const fallbackStorageDirectory = join(
+  tmpdir(),
+  `codio-rooms-${createHash('sha256').update(process.cwd()).digest('hex').slice(0, 12)}`
+);
+const shouldPersistMemoryFallback = process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
+
+function fallbackRecordPath(kind: 'room' | 'document', key: string): string {
+  const keyHash = createHash('sha256').update(key).digest('hex');
+  return join(fallbackStorageDirectory, `${kind}-${keyHash}.json`);
+}
+
+async function readFallbackRecord<T>(kind: 'room' | 'document', key: string): Promise<T | null> {
+  if (!shouldPersistMemoryFallback) return null;
+
+  try {
+    const contents = await readFile(fallbackRecordPath(kind, key), 'utf8');
+    return JSON.parse(contents) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writeFallbackRecord(kind: 'room' | 'document', key: string, value: Room | DocumentSnapshot): Promise<void> {
+  if (!shouldPersistMemoryFallback) return;
+
+  const path = fallbackRecordPath(kind, key);
+  const temporaryPath = `${path}.${process.pid}.${nanoid(6)}.tmp`;
+  await mkdir(fallbackStorageDirectory, { recursive: true });
+  await writeFile(temporaryPath, JSON.stringify(value), { encoding: 'utf8', flag: 'wx' });
+  await rename(temporaryPath, path);
+}
+
+async function persistMemoryRoom(room: Room): Promise<void> {
+  await Promise.all([
+    writeFallbackRecord('room', room.public_id, room),
+    writeFallbackRecord('room', room.id, room),
+  ]);
+}
 
 export async function createRoom(input: CreateRoomInput, userId?: string | null): Promise<{ publicId: string; roomId: string }> {
-  const publicId = input.customSlug?.trim() ? input.customSlug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') : nanoid(10);
+  const customSlug = input.customSlug ? normalizeRoomSlug(input.customSlug) : null;
+  if (input.customSlug?.trim() && !customSlug) {
+    throw new Error('Room link can only contain letters, numbers, hyphens, and underscores');
+  }
+  const publicId = customSlug || nanoid(12).toLowerCase();
   const selectedLang = getLanguageById(input.language);
 
   const supabase = await createSupabaseServerClient();
@@ -90,6 +149,10 @@ export async function createRoom(input: CreateRoomInput, userId?: string | null)
   memoryRooms.set(publicId, newRoom);
   memoryRooms.set(id, newRoom);
   memoryDocuments.set(id, newDoc);
+  await Promise.all([
+    persistMemoryRoom(newRoom),
+    writeFallbackRecord('document', id, newDoc),
+  ]);
 
   return { publicId, roomId: id };
 }
@@ -182,15 +245,20 @@ export async function getRoomDetails(publicIdOrId: string, userId?: string | nul
   }
 
   // Fallback in-memory check
-  const room = memoryRooms.get(publicIdOrId);
+  const room = memoryRooms.get(publicIdOrId) || await readFallbackRecord<Room>('room', publicIdOrId);
   if (!room) {
     return null;
   }
 
+  memoryRooms.set(room.public_id, room);
+  memoryRooms.set(room.id, room);
+
   if (room.is_closed) return null;
   if (room.expires_at && new Date(room.expires_at) <= new Date()) return null;
 
-  const doc = memoryDocuments.get(room.id) || {
+  const savedDocument = memoryDocuments.get(room.id) || await readFallbackRecord<DocumentSnapshot>('document', room.id);
+  if (savedDocument) memoryDocuments.set(room.id, savedDocument);
+  const doc = savedDocument || {
     id: `doc_${room.id}`,
     room_id: room.id,
     file_name: 'main.ts',
@@ -221,10 +289,19 @@ export async function getOrCreateRoom(
   publicIdOrId: string,
   userId?: string | null
 ): Promise<RoomDetails | null> {
-  const sanitizedSlug = publicIdOrId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const requestedId = publicIdOrId.trim();
+  const existingByExactId = await getRoomDetails(requestedId, userId);
+  if (existingByExactId) {
+    return existingByExactId;
+  }
 
-  // 1. Try to fetch existing room directly
-  const existing = await getRoomDetails(sanitizedSlug, userId);
+  const sanitizedSlug = normalizeRoomSlug(requestedId);
+  if (!sanitizedSlug || !isValidRoomSlug(sanitizedSlug)) {
+    return null;
+  }
+
+  // Room IDs created before lowercase IDs were introduced may contain uppercase letters.
+  const existing = requestedId === sanitizedSlug ? null : await getRoomDetails(sanitizedSlug, userId);
   if (existing) {
     return existing;
   }
@@ -322,8 +399,11 @@ export async function getOrCreateRoom(
       if (fresh) {
         return fresh;
       }
-    } catch (err: any) {
-      console.warn('[Store] Auto-creation in DB had an issue (e.g. concurrent creation), re-fetching:', err?.message || err);
+    } catch (err: unknown) {
+      console.warn(
+        '[Store] Auto-creation in DB had an issue (e.g. concurrent creation), re-fetching:',
+        err instanceof Error ? err.message : String(err)
+      );
       // If error was duplicate key, re-fetch
       const freshAfterConflict = await getRoomDetails(sanitizedSlug, userId);
       if (freshAfterConflict) {
@@ -361,6 +441,10 @@ export async function getOrCreateRoom(
   memoryRooms.set(sanitizedSlug, guestRoom);
   memoryRooms.set(guestRoom.id, guestRoom);
   memoryDocuments.set(guestRoom.id, guestDoc);
+  await Promise.all([
+    persistMemoryRoom(guestRoom),
+    writeFallbackRecord('document', guestRoom.id, guestDoc),
+  ]);
 
   return {
     room: guestRoom,
@@ -437,6 +521,7 @@ export async function persistSnapshot(
   };
 
   memoryDocuments.set(details.room.id, updatedDoc);
+  await writeFallbackRecord('document', details.room.id, updatedDoc);
   return { success: true, revision: nextRevision };
 }
 
@@ -452,14 +537,18 @@ export async function updateRoom(
 
   const supabase = await createSupabaseServerClient();
   if (supabase) {
-    const updatePayload: any = { updated_at: new Date().toISOString() };
-    if (input.title) updatePayload.title = input.title;
-    if (input.visibility) updatePayload.visibility = input.visibility;
-    if (input.defaultAccessMode) updatePayload.default_access_mode = input.defaultAccessMode;
-    if (input.isClosed !== undefined) {
-      updatePayload.is_closed = input.isClosed;
-      if (input.isClosed) updatePayload.closed_at = new Date().toISOString();
-    }
+    const updatePayload = {
+      updated_at: new Date().toISOString(),
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.visibility ? { visibility: input.visibility } : {}),
+      ...(input.defaultAccessMode ? { default_access_mode: input.defaultAccessMode } : {}),
+      ...(input.isClosed !== undefined
+        ? {
+            is_closed: input.isClosed,
+            ...(input.isClosed ? { closed_at: new Date().toISOString() } : {}),
+          }
+        : {}),
+    };
 
     const { error } = await supabase
       .from('rooms')
@@ -479,6 +568,7 @@ export async function updateRoom(
       room.closed_at = input.isClosed ? new Date().toISOString() : null;
     }
     room.updated_at = new Date().toISOString();
+    await persistMemoryRoom(room);
   }
   return true;
 }

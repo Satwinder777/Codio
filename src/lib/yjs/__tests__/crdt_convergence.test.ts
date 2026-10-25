@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as Y from 'yjs';
-import { uint8ArrayToBase64, base64ToUint8Array } from '../utils';
+import { uint8ArrayToBase64, base64ToUint8Array, createSnapshotUpdate } from '../utils';
 
 describe('Yjs CRDT Real-time Concurrency & Convergence', () => {
   it('converts Uint8Array to base64 and back with byte-for-byte fidelity', () => {
@@ -101,5 +101,29 @@ describe('Yjs CRDT Real-time Concurrency & Convergence', () => {
     expect(textA.toString()).toContain('A');
     expect(textA.toString()).toContain('B');
     expect(textA.toString()).toContain('C');
+  });
+
+  it('uses the same persisted snapshot seed for simultaneous room joins', () => {
+    const snapshot = createSnapshotUpdate('shared-room', 4, 'starter code\n');
+    const docA = new Y.Doc();
+    const docB = new Y.Doc();
+    Y.applyUpdate(docA, snapshot);
+    Y.applyUpdate(docB, snapshot);
+
+    expect(docA.getText('monaco').toString()).toBe('starter code\n');
+    expect(docB.getText('monaco').toString()).toBe('starter code\n');
+
+    docA.getText('monaco').insert(0, '// from A\n');
+    docB.getText('monaco').insert(0, '// from B\n');
+    Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB, Y.encodeStateVector(docA)));
+    Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA, Y.encodeStateVector(docB)));
+
+    expect(docA.getText('monaco').toString()).toBe(docB.getText('monaco').toString());
+    expect(docA.getText('monaco').toString()).toContain('starter code');
+    expect(docA.getText('monaco').toString()).toContain('// from A');
+    expect(docA.getText('monaco').toString()).toContain('// from B');
+
+    docA.destroy();
+    docB.destroy();
   });
 });

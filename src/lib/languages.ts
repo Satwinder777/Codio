@@ -342,3 +342,9 @@ export function getLanguageById(id: string): SupportedLanguage {
   const found = SUPPORTED_LANGUAGES.find((lang) => lang.id.toLowerCase() === id.toLowerCase() || lang.monacoId.toLowerCase() === id.toLowerCase());
   return found || SUPPORTED_LANGUAGES[0];
 }
+
+export function isSupportedLanguageId(id: string): boolean {
+  return SUPPORTED_LANGUAGES.some(
+    (lang) => lang.id.toLowerCase() === id.toLowerCase() || lang.monacoId.toLowerCase() === id.toLowerCase()
+  );
+}

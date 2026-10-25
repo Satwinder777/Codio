@@ -1,4 +1,27 @@
 // Base64 and Uint8Array binary conversion utilities for Yjs CRDT payloads
+import * as Y from 'yjs';
+
+/**
+ * Builds a persisted text snapshot as a shared Yjs genesis update.
+ * Clients opening the same room revision receive identical CRDT items, so
+ * simultaneous first joins cannot duplicate the starter document.
+ */
+export function createSnapshotUpdate(roomId: string, revision: number, content: string): Uint8Array {
+  const seed = `${roomId}:${revision}:${content}`;
+  let clientId = 2166136261;
+  for (let index = 0; index < seed.length; index++) {
+    clientId = Math.imul(clientId ^ seed.charCodeAt(index), 16777619);
+  }
+  clientId >>>= 0;
+  if (clientId === 0) clientId = 1;
+
+  const snapshotDoc = new Y.Doc();
+  snapshotDoc.clientID = clientId;
+  if (content.length > 0) snapshotDoc.getText('monaco').insert(0, content);
+  const update = Y.encodeStateAsUpdate(snapshotDoc);
+  snapshotDoc.destroy();
+  return update;
+}
 
 export function uint8ArrayToBase64(bytes: Uint8Array): string {
   let binary = '';

@@ -13,6 +13,7 @@ export class MonacoBinding {
 
   private isApplyingRemoteUpdate = false;
   private isApplyingLocalUpdate = false;
+  private isDestroyed = false;
   private monacoDisposable: { dispose: () => void } | null = null;
 
   constructor(
@@ -45,7 +46,7 @@ export class MonacoBinding {
   }
 
   private handleYTextChange = (event: Y.YTextEvent) => {
-    if (event.transaction.origin === this || this.isApplyingLocalUpdate) {
+    if (this.isDestroyed || this.monacoModel.isDisposed() || event.transaction.origin === this || this.isApplyingLocalUpdate) {
       return;
     }
 
@@ -92,15 +93,18 @@ export class MonacoBinding {
   };
 
   private handleMonacoChange = (event: editor.IModelContentChangedEvent) => {
-    if (this.isApplyingRemoteUpdate) {
+    if (this.isDestroyed || this.monacoModel.isDisposed() || this.isApplyingRemoteUpdate) {
       return;
     }
 
     this.isApplyingLocalUpdate = true;
     try {
       this.doc.transact(() => {
-        // Changes are sorted from bottom to top by default in Monaco
-        event.changes.forEach((change) => {
+        // Apply from right to left so replacements do not shift the original
+        // offsets used by later Monaco changes.
+        [...event.changes]
+          .sort((left, right) => right.rangeOffset - left.rangeOffset)
+          .forEach((change) => {
           this.ytext.delete(change.rangeOffset, change.rangeLength);
           this.ytext.insert(change.rangeOffset, change.text);
         });
@@ -111,6 +115,7 @@ export class MonacoBinding {
   };
 
   public destroy() {
+    this.isDestroyed = true;
     this.ytext.unobserve(this.handleYTextChange);
     if (this.monacoDisposable) {
       this.monacoDisposable.dispose();
