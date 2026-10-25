@@ -19,18 +19,60 @@ import type { User } from '@supabase/supabase-js';
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | { email?: string; user_metadata?: { full_name?: string } } | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+    const checkLocalUser = () => {
+      if (typeof window === 'undefined') return;
+      const localEmail = localStorage.getItem('codio_user_email');
+      const localName = localStorage.getItem('codio_user_name');
+      if (localEmail || localName) {
+        setUser({
+          email: localEmail || `${localName?.toLowerCase().replace(/\s+/g, '') || 'coder'}@codio.dev`,
+          user_metadata: { full_name: localName || localEmail?.split('@')[0] || 'Coder' },
+        });
+      } else {
+        setUser(null);
+      }
+    };
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
+    const syncUser = () => {
+      const supabase = getSupabaseBrowserClient();
+      if (supabase) {
+        supabase.auth.getSession().then(({ data }) => {
+          if (data.session?.user) {
+            setUser(data.session.user);
+          } else {
+            checkLocalUser();
+          }
+        }).catch(() => {
+          checkLocalUser();
+        });
+      } else {
+        checkLocalUser();
+      }
+    };
+
+    syncUser();
+
+    const supabase = getSupabaseBrowserClient();
+    const sub = supabase?.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+      } else {
+        checkLocalUser();
+      }
     });
 
-    return () => authListener.subscription.unsubscribe();
+    window.addEventListener('codio-auth-change', syncUser);
+    window.addEventListener('storage', syncUser);
+
+    return () => {
+      sub?.data.subscription.unsubscribe();
+      window.removeEventListener('codio-auth-change', syncUser);
+      window.removeEventListener('storage', syncUser);
+    };
   }, []);
 
   const handleInstantRoom = async () => {
@@ -61,10 +103,19 @@ export function Navbar() {
   const handleSignOut = async () => {
     const supabase = getSupabaseBrowserClient();
     if (supabase) {
-      await supabase.auth.signOut();
-      setUser(null);
-      router.push('/');
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore signout errors
+      }
     }
+    localStorage.removeItem('codio_user_id');
+    localStorage.removeItem('codio_user_name');
+    localStorage.removeItem('codio_user_email');
+    localStorage.removeItem('codio_auth_user');
+    window.dispatchEvent(new Event('codio-auth-change'));
+    setUser(null);
+    router.push('/');
   };
 
   if (isRoomEditorPath(pathname)) return null;
