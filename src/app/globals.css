@@ -269,7 +269,12 @@ body.dark {
 }
 
 .landing-glow {
+  background: radial-gradient(ellipse at center, rgba(124, 58, 237, 0.14), rgba(14, 165, 233, 0.05) 42%, transparent 72%);
   animation: landing-glow 9s ease-in-out infinite;
+}
+
+html[data-theme="codio"] .landing-glow {
+  background: radial-gradient(ellipse at center, rgba(124, 58, 237, 0.22), rgba(14, 165, 233, 0.09) 42%, transparent 72%);
 }
 
 .landing-gradient-text {
@@ -366,8 +371,47 @@ html[data-theme="codio"] .landing-page {
 
 .showcase-aura {
   background: radial-gradient(ellipse at 52% 48%, rgba(109, 79, 245, 0.22), rgba(34, 211, 238, 0.08) 48%, transparent 72%);
-  filter: blur(28px);
   animation: showcase-aura 8s ease-in-out infinite alternate;
+}
+
+.showcase-neural-field {
+  opacity: 0.64;
+  mask-image: linear-gradient(90deg, transparent 10%, black 46%, black 100%);
+}
+
+.showcase-neural-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.76;
+}
+
+.showcase-neural-drift {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: neural-drift 13s ease-in-out infinite alternate;
+}
+
+.showcase-neural-flare {
+  position: absolute;
+  top: 20%;
+  right: 13%;
+  width: 13rem;
+  height: 13rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(103, 232, 249, 0.16), rgba(139, 92, 246, 0.09) 42%, transparent 72%);
+  animation: neural-flare 8s ease-in-out infinite alternate;
+}
+
+@keyframes neural-drift {
+  from { transform: translate3d(-5px, 3px, 0) rotate(-1.5deg) scale(0.985); }
+  to { transform: translate3d(6px, -5px, 0) rotate(1.5deg) scale(1.025); }
+}
+
+@keyframes neural-flare {
+  from { opacity: 0.48; transform: scale(0.84); }
+  to { opacity: 1; transform: scale(1.12); }
 }
 
 @keyframes showcase-aura {
@@ -418,6 +462,14 @@ html[data-theme="codio"] .landing-page {
   animation: landing-enter 240ms ease-out both;
 }
 
+section[data-visible="false"] .showcase-aura,
+section[data-visible="false"] .showcase-neural-drift,
+section[data-visible="false"] .showcase-neural-flare,
+section[data-visible="false"] .showcase-ping,
+section[data-visible="false"] .showcase-float-card {
+  animation-play-state: paused;
+}
+
 /* Page-specific cursor ambience. The layer never captures input. */
 .cursor-reactive-layer {
   position: fixed;
@@ -428,6 +480,16 @@ html[data-theme="codio"] .landing-page {
   opacity: 0;
   mix-blend-mode: screen;
   transition: opacity 260ms ease;
+}
+
+.cursor-reactive__particles {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 480px;
+  height: 480px;
+  opacity: 0.86;
+  will-change: transform;
 }
 
 .cursor-reactive-layer[data-active="true"] {
@@ -449,7 +511,6 @@ html[data-theme="codio"] .landing-page {
   width: 280px;
   height: 280px;
   background: radial-gradient(circle, rgba(139, 92, 246, 0.15), rgba(56, 189, 248, 0.045) 38%, transparent 72%);
-  filter: blur(8px);
 }
 
 .cursor-reactive__halo {
@@ -457,6 +518,31 @@ html[data-theme="codio"] .landing-page {
   height: 92px;
   border: 1px solid rgba(196, 181, 253, 0.28);
   transition: width 240ms ease, height 240ms ease, border-color 240ms ease;
+}
+
+.cursor-reactive__halo::before,
+.cursor-reactive__halo::after {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  content: "";
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.cursor-reactive__halo::before {
+  inset: -15px;
+}
+
+.cursor-reactive-layer[data-active="true"] .cursor-reactive__halo::before {
+  animation: cursor-echo 2.8s ease-out infinite;
+}
+
+.cursor-reactive__halo::after {
+  inset: 9px;
+  opacity: 0.28;
 }
 
 .cursor-reactive__core {
@@ -473,15 +559,19 @@ html[data-theme="codio"] .landing-page {
 }
 
 .cursor-reactive-layer[data-effect="home"] .cursor-reactive__glow {
-  width: 430px;
-  height: 430px;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.2), rgba(34, 211, 238, 0.08) 38%, transparent 72%);
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.24), rgba(34, 211, 238, 0.11) 34%, rgba(129, 140, 248, 0.045) 53%, transparent 73%);
 }
 
 .cursor-reactive-layer[data-effect="home"] .cursor-reactive__halo {
-  width: 110px;
-  height: 110px;
+  width: 128px;
+  height: 128px;
   border-style: dashed;
+  color: rgba(103, 232, 249, 0.62);
+}
+
+.cursor-reactive-layer[data-active="true"][data-effect="home"] .cursor-reactive__halo {
   animation: cursor-orbit 18s linear infinite;
 }
 
@@ -497,6 +587,7 @@ html[data-theme="codio"] .landing-page {
   border-color: rgba(103, 232, 249, 0.48);
   rotate: -24deg;
   border-radius: 50%;
+  color: rgba(103, 232, 249, 0.48);
 }
 
 .cursor-reactive-layer[data-effect="settings"] .cursor-reactive__glow {
@@ -509,6 +600,7 @@ html[data-theme="codio"] .landing-page {
   border-color: rgba(251, 191, 36, 0.55);
   border-width: 2px;
   box-shadow: inset 0 0 24px rgba(251, 191, 36, 0.07), 0 0 24px rgba(244, 114, 182, 0.1);
+  color: rgba(251, 191, 36, 0.55);
 }
 
 .cursor-reactive-layer[data-effect="login"] .cursor-reactive__glow,
@@ -520,6 +612,10 @@ html[data-theme="codio"] .landing-page {
 
 .cursor-reactive-layer[data-effect="login"] .cursor-reactive__halo {
   border-color: rgba(96, 165, 250, 0.5);
+  color: rgba(96, 165, 250, 0.5);
+}
+
+.cursor-reactive-layer[data-active="true"][data-effect="login"] .cursor-reactive__halo {
   animation: cursor-breathe 3.2s ease-in-out infinite;
 }
 
@@ -533,6 +629,10 @@ html[data-theme="codio"] .landing-page {
   border-color: rgba(232, 121, 249, 0.56);
   border-style: dotted;
   border-width: 2px;
+  color: rgba(232, 121, 249, 0.55);
+}
+
+.cursor-reactive-layer[data-active="true"][data-effect="signup"] .cursor-reactive__halo {
   animation: cursor-orbit 12s linear infinite reverse;
 }
 
@@ -540,6 +640,10 @@ html[data-theme="codio"] .landing-page {
   width: 56px;
   height: 56px;
   border-color: rgba(129, 140, 248, 0.55);
+  color: rgba(129, 140, 248, 0.55);
+}
+
+.cursor-reactive-layer[data-active="true"][data-effect="recovery"] .cursor-reactive__halo {
   animation: cursor-ripple 2.4s ease-out infinite;
 }
 
@@ -555,6 +659,7 @@ html[data-theme="codio"] .landing-page {
   height: 160px;
   border-color: rgba(94, 234, 212, 0.42);
   border-radius: 50%;
+  color: rgba(94, 234, 212, 0.42);
 }
 
 .cursor-reactive-layer[data-effect="terms"] .cursor-reactive__glow {
@@ -568,6 +673,7 @@ html[data-theme="codio"] .landing-page {
   height: 76px;
   border-color: rgba(203, 213, 225, 0.5);
   box-shadow: 0 0 0 10px rgba(203, 213, 225, 0.035), 0 0 0 20px rgba(129, 140, 248, 0.025);
+  color: rgba(203, 213, 225, 0.5);
 }
 
 .cursor-reactive-layer[data-effect="editor"] .cursor-reactive__glow {
@@ -580,6 +686,7 @@ html[data-theme="codio"] .landing-page {
   width: 28px;
   height: 28px;
   border-color: rgba(103, 232, 249, 0.36);
+  color: rgba(103, 232, 249, 0.36);
 }
 
 .cursor-reactive-layer[data-effect="editor"] .cursor-reactive__core {
@@ -606,6 +713,11 @@ html[data-theme="codio"] .landing-page {
 @keyframes cursor-ripple {
   0% { scale: 0.55; opacity: 0.75; }
   100% { scale: 1.75; opacity: 0; }
+}
+
+@keyframes cursor-echo {
+  0% { transform: scale(0.82); opacity: 0.42; }
+  100% { transform: scale(1.24); opacity: 0; }
 }
 
 html[data-theme="light"] .cursor-reactive-layer {

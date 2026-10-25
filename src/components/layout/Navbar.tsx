@@ -24,19 +24,13 @@ export function Navbar() {
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
-    if (supabase) {
-      supabase.auth.getUser().then(({ data }) => {
-        setUser(data.user);
-      });
+    if (!supabase) return;
 
-      const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user || null);
-      });
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
 
-      return () => {
-        authListener.subscription.unsubscribe();
-      };
-    }
+    return () => authListener.subscription.unsubscribe();
   }, []);
 
   const handleInstantRoom = async () => {

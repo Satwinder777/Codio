@@ -26,12 +26,14 @@ export default function SettingsPage() {
     const storedWordWrap = localStorage.getItem('codio_word_wrap') || 'on';
     const storedMinimap = localStorage.getItem('codio_minimap') !== 'false';
 
-    setDisplayName(storedName);
-    setDefaultLang(storedLang);
-    setFontSize(storedFontSize);
-    setTabSize(storedTabSize);
-    setWordWrap(storedWordWrap);
-    setMinimap(storedMinimap);
+    const preferencesFrame = window.requestAnimationFrame(() => {
+      setDisplayName(storedName);
+      setDefaultLang(storedLang);
+      setFontSize(storedFontSize);
+      setTabSize(storedTabSize);
+      setWordWrap(storedWordWrap);
+      setMinimap(storedMinimap);
+    });
 
     // Supabase auth user
     const supabase = getSupabaseBrowserClient();
@@ -45,6 +47,8 @@ export default function SettingsPage() {
         }
       });
     }
+
+    return () => window.cancelAnimationFrame(preferencesFrame);
   }, []);
 
   const handleSave = (e: React.FormEvent) => {

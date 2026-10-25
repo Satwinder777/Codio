@@ -40,7 +40,6 @@ export default function DashboardPage() {
 
   const fetchRooms = async () => {
     try {
-      setLoading(true);
       const res = await fetch('/api/rooms');
       if (res.ok) {
         const data = await res.json();
@@ -54,7 +53,10 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    fetchRooms();
+    const initialFetchFrame = window.requestAnimationFrame(() => {
+      void fetchRooms();
+    });
+    return () => window.cancelAnimationFrame(initialFetchFrame);
   }, []);
 
   const handleCreateRoom = async (e: React.FormEvent) => {
@@ -336,7 +338,7 @@ export default function DashboardPage() {
                   <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1">Visibility</label>
                   <select
                     value={newRoomVisibility}
-                    onChange={(e: any) => setNewRoomVisibility(e.target.value)}
+                    onChange={(event) => setNewRoomVisibility(event.target.value as 'unlisted' | 'public' | 'private')}
                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-2 text-xs text-slate-900 dark:text-white focus:outline-none cursor-pointer"
                   >
                     <option value="unlisted">Unlisted (Link)</option>

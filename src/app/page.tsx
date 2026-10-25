@@ -81,7 +81,7 @@ export default function HomePage() {
   return (
     <div className="landing-page relative isolate flex-1 overflow-hidden text-slate-900 transition-colors dark:text-slate-100">
       <div aria-hidden="true" className="landing-mesh pointer-events-none absolute inset-0 -z-10" />
-      <div aria-hidden="true" className="landing-glow pointer-events-none absolute -top-64 left-[68%] -z-10 h-[42rem] w-[52rem] -translate-x-1/2 rounded-full bg-violet-500/15 blur-[120px] dark:bg-violet-500/20" />
+      <div aria-hidden="true" className="landing-glow pointer-events-none absolute -top-64 left-[68%] -z-10 h-[42rem] w-[52rem] -translate-x-1/2 rounded-full" />
       <div aria-hidden="true" className="landing-orbit landing-orbit-one pointer-events-none absolute right-[7%] top-24 -z-10 hidden h-80 w-80 rounded-full border border-violet-400/[0.12] lg:block" />
       <div aria-hidden="true" className="landing-orbit landing-orbit-two pointer-events-none absolute right-[12%] top-36 -z-10 hidden h-64 w-64 rounded-full border border-cyan-300/[0.12] lg:block" />
 

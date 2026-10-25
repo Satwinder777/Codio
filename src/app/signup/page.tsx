@@ -37,7 +37,7 @@ export default function SignupPage() {
         return;
       }
 
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -54,8 +54,8 @@ export default function SignupPage() {
         setIsSuccess(true);
         toast.success('Account created! Please check your email to verify.');
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
       setLoading(false);
     }

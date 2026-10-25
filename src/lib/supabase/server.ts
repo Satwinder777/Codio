@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export function isSupabaseServerConfigured(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -48,7 +48,6 @@ export function createSupabaseAdminClient(): SupabaseClient | null {
     return null;
   }
 
-  const { createClient } = require('@supabase/supabase-js');
   return createClient(url, serviceKey, {
     auth: {
       persistSession: false,

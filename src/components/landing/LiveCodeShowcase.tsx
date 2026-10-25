@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Code2, Pause, Play, Radio, UsersRound, Zap } from 'lucide-react';
 
 const steps = [
@@ -86,7 +86,9 @@ function colorize(line: string) {
 }
 
 export function LiveCodeShowcase() {
+  const sectionRef = useRef<HTMLElement>(null);
   const [activeStep, setActiveStep] = useState(0);
+  const [isInView, setIsInView] = useState(false);
   const [playbackOverride, setPlaybackOverride] = useState<boolean | null>(null);
   const prefersReducedMotion = useSyncExternalStore(
     subscribeToReducedMotion,
@@ -97,14 +99,29 @@ export function LiveCodeShowcase() {
   const isPlaying = playbackOverride ?? !prefersReducedMotion;
 
   useEffect(() => {
-    if (!isPlaying) return;
+    const section = sectionRef.current;
+    if (!section) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      const fallbackFrame = window.requestAnimationFrame(() => setIsInView(true));
+      return () => window.cancelAnimationFrame(fallbackFrame);
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsInView(Boolean(entry?.isIntersecting));
+    }, { rootMargin: '120px' });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isPlaying || !isInView) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         setActiveStep(getNextShowcaseStep);
       }
     }, 4200);
     return () => window.clearInterval(interval);
-  }, [isPlaying]);
+  }, [isInView, isPlaying]);
 
   const chooseStep = (index: number) => {
     setActiveStep(index);
@@ -112,10 +129,44 @@ export function LiveCodeShowcase() {
   };
 
   return (
-    <section aria-label="Interactive live coding preview" className="relative mx-auto w-full max-w-[660px] pb-0 lg:mx-0 lg:pb-16">
+    <section ref={sectionRef} data-visible={isInView} aria-label="Interactive live coding preview" className="relative mx-auto w-full max-w-[660px] pb-0 lg:mx-0 lg:pb-16">
       <div aria-hidden="true" className="showcase-aura absolute -inset-8 rounded-[2.5rem]" />
-      <div className="showcase-window relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1020] shadow-[0_40px_120px_-40px_rgba(61,44,160,0.72)]">
-        <header className="flex h-12 items-center justify-between border-b border-white/[0.07] bg-white/[0.025] px-4 sm:px-5">
+      <div className="showcase-window relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-[#0c1020]/90 shadow-[0_40px_120px_-40px_rgba(61,44,160,0.72)] backdrop-blur-2xl">
+        <div aria-hidden="true" className="showcase-neural-field pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          <svg className="showcase-neural-art" viewBox="0 0 760 420" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <radialGradient id="codio-neural-core">
+                <stop offset="0" stopColor="#a5f3fc" stopOpacity="0.9" />
+                <stop offset="0.18" stopColor="#67e8f9" stopOpacity="0.52" />
+                <stop offset="0.54" stopColor="#8b5cf6" stopOpacity="0.2" />
+                <stop offset="1" stopColor="#8b5cf6" stopOpacity="0" />
+              </radialGradient>
+              <radialGradient id="codio-neural-shell">
+                <stop offset="0.38" stopColor="#c4b5fd" stopOpacity="0.02" />
+                <stop offset="0.78" stopColor="#67e8f9" stopOpacity="0.12" />
+                <stop offset="1" stopColor="#a78bfa" stopOpacity="0.01" />
+              </radialGradient>
+            </defs>
+            <g className="showcase-neural-drift">
+              <circle cx="572" cy="188" r="168" fill="url(#codio-neural-shell)" />
+              <circle cx="572" cy="188" r="132" fill="url(#codio-neural-core)" />
+              <circle cx="572" cy="188" r="112" fill="none" stroke="#a5f3fc" strokeOpacity="0.24" />
+              <ellipse cx="572" cy="188" rx="154" ry="54" fill="none" stroke="#c4b5fd" strokeOpacity="0.2" transform="rotate(-28 572 188)" />
+              <ellipse cx="572" cy="188" rx="150" ry="62" fill="none" stroke="#67e8f9" strokeOpacity="0.16" transform="rotate(34 572 188)" />
+              <path d="M464 155c24-33 40 28 64-4s36-36 51-4 31 33 58-2 41-12 48 19" fill="none" stroke="#a5f3fc" strokeOpacity="0.44" strokeWidth="1.4" />
+              <path d="M456 211c28-32 42 27 66-5s39-33 55-2 30 29 54-5 39-12 50 17" fill="none" stroke="#c4b5fd" strokeOpacity="0.32" strokeWidth="1.2" />
+              <path d="M485 251c20-24 34 17 54-7s31-26 43-3 25 21 44-4 31-9 39 12" fill="none" stroke="#67e8f9" strokeOpacity="0.3" strokeWidth="1" />
+              <circle cx="494" cy="151" r="3" fill="#e0f2fe" />
+              <circle cx="579" cy="126" r="2.5" fill="#a5f3fc" />
+              <circle cx="645" cy="168" r="3" fill="#c4b5fd" />
+              <circle cx="527" cy="222" r="2.5" fill="#67e8f9" />
+              <circle cx="609" cy="244" r="2" fill="#e0f2fe" />
+              <circle cx="680" cy="216" r="2.5" fill="#a5f3fc" />
+            </g>
+          </svg>
+          <span className="showcase-neural-flare" />
+        </div>
+        <header className="relative z-10 flex h-12 items-center justify-between border-b border-white/[0.07] bg-white/[0.025] px-4 sm:px-5">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center gap-1.5" aria-hidden="true">
               <span className="h-2 w-2 rounded-full bg-rose-400/80" />
@@ -141,7 +192,7 @@ export function LiveCodeShowcase() {
           </div>
         </header>
 
-        <div className="relative px-3 py-5 sm:px-6 sm:py-7">
+        <div className="relative z-10 px-3 py-5 sm:px-6 sm:py-7">
           <div aria-hidden="true" className="showcase-grid pointer-events-none absolute inset-0 opacity-60" />
           <div className="relative space-y-2 font-mono text-[11px] leading-7 sm:text-[13px] sm:leading-8">
             {step.lines.map((line, index) => (
@@ -166,7 +217,7 @@ export function LiveCodeShowcase() {
           </div>
         </div>
 
-        <footer className="relative flex flex-col gap-3 border-t border-white/[0.07] bg-black/15 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <footer className="relative z-10 flex flex-col gap-3 border-t border-white/[0.07] bg-black/15 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex items-center gap-1.5" role="group" aria-label="Demo steps">
             {steps.map((item, index) => (
               <button

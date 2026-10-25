@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createRoom, getRoomDetails, persistSnapshot } from '../store';
 
 describe('Room Snapshot Persistence & Monotonic Revision Control', () => {
-  let roomId: string;
   let publicId: string;
 
   beforeEach(async () => {
@@ -12,7 +11,6 @@ describe('Room Snapshot Persistence & Monotonic Revision Control', () => {
       visibility: 'unlisted',
       defaultAccessMode: 'editor',
     });
-    roomId = res.roomId;
     publicId = res.publicId;
   });
 

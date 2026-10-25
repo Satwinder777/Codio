@@ -41,8 +41,8 @@ export default function LoginPage() {
         toast.success('Welcome back to Codio!');
         router.push('/dashboard');
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred');
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
       setLoading(false);
     }
